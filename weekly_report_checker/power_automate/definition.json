@@ -1,0 +1,80 @@
+{
+  "definition": {
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "contentVersion": "1.0.0.0",
+    "triggers": {
+      "manual": {
+        "type": "Request",
+        "kind": "Button",
+        "inputs": {}
+      }
+    },
+    "actions": {
+      "Get_file_content": {
+        "type": "ApiConnection",
+        "inputs": {
+          "host": { "connection": { "name": "@parameters('$connections')['shared_onedrive']['connectionId']" } },
+          "method": "get",
+          "path": "/datasets/default/files/@{encodeURIComponent(parameters('MemberListPath'))}/content"
+        },
+        "metadata": { "description": "從 OneDrive 讀取 member_list.txt，參數 MemberListPath 請在匯入後設為檔案識別碼或路徑" }
+      },
+      "Parse_member_list": {
+        "type": "Compose",
+        "inputs": "@split(replace(body('Get_file_content'), '﻿', ''), '\n')",
+        "runAfter": { "Get_file_content": ["Succeeded"] }
+      },
+      "Apply_to_each_member": {
+        "type": "Foreach",
+        "foreach": "@outputs('Parse_member_list')",
+        "actions": {
+          "OneNote_list_pages": {
+            "type": "ApiConnection",
+            "inputs": {
+              "host": { "connection": { "name": "@parameters('$connections')['onenote']['connectionId']" } },
+              "method": "get",
+              "path": "/v1.0/me/notes/sections/@{items('Apply_to_each_member')}/pages"
+            },
+            "runAfter": {}
+          },
+          "Compose_member_json": {
+            "type": "Compose",
+            "inputs": {
+              "同仁名": "@items('Apply_to_each_member')",
+              "頁面日期": "@body('OneNote_list_pages')"
+            },
+            "runAfter": { "OneNote_list_pages": ["Succeeded"] }
+          }
+        },
+        "runAfter": { "Parse_member_list": ["Succeeded"] }
+      },
+      "Build_final_json": {
+        "type": "Compose",
+        "inputs": {
+          "members": "@outputs('Apply_to_each_member')",
+          "exportTime": "@utcNow()"
+        },
+        "runAfter": { "Apply_to_each_member": ["Succeeded"] }
+      },
+      "Create_file": {
+        "type": "ApiConnection",
+        "inputs": {
+          "host": { "connection": { "name": "@parameters('$connections')['shared_onedrive']['connectionId']" } },
+          "method": "post",
+          "path": "/datasets/default/files",
+          "body": {
+            "fileName": "@concat('onenote_pages_', formatDateTime(utcNow(), 'yyyyMMdd_HHmmss'), '.json')",
+            "folderPath": "@parameters('OutputFolderPath')",
+            "content": "@string(body('Build_final_json'))"
+          }
+        },
+        "runAfter": { "Build_final_json": ["Succeeded"] }
+      }
+    }
+  },
+  "parameters": {
+    "$connections": { "defaultValue": {}, "type": "Object" },
+    "MemberListPath": { "defaultValue": "/path/to/member_list.txt", "type": "String" },
+    "OutputFolderPath": { "defaultValue": "/WeeklyReport", "type": "String" }
+  }
+}
