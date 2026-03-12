@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Playwright
+playwright-report/
+test-results/
+.playwright/
+
+# Config / secrets (若之後有 .env 放 URL 或帳密，不要 commit)
+.env
+.env.local
+*.local.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# 實際要加入的成員名單（若含個資可放這裡避免上傳）
+# members.txt
