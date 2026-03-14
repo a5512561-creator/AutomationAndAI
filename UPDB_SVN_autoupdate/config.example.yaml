@@ -1,0 +1,11 @@
+# UPDB-manager 批次加人 — 設定範例
+# 複製為 config.yaml 並依需要修改（config.yaml 勿提交至版控）
+
+# 登入頁 URL（可含 index.php；程式會自動用 ManagementZone 根路徑組 UPDB/SVN 連結）
+updb_login_url: "https://project.rd.realtek.com/ManagementZone/index.php"
+
+# 預設輸入文字檔路徑（可選；亦可由指令列參數指定）
+# input_file: "members.txt"
+
+# 新增成員後等待時間（秒），建議 180–300
+member_add_wait_seconds: 180

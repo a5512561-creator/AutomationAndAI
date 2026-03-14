@@ -1,0 +1,6 @@
+# 範例輸入（E2E 測試用）；實際執行請替換為真實成員名單
+# 格式：第一欄 Tab 第二欄；第一欄 = 專案 群組 [SVN] RT，第二欄 = 工號
+# 見 docs/INPUT_FORMAT.md
+RL6483 Digital SVN RT	R9901	柯佳佑	3518704	通訊網路事業群	 joeke@realtek.com
+RL6483 Digital SVN RT	R9568	蔡彥勛	3518177	通訊網路事業群	 yenhsun0426@realtek.com
+RL6483 Digital SVN RT	R9980	張凱博	3518030	通訊網路事業群	 kp.chang03@realtek.com

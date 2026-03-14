@@ -1,0 +1,44 @@
+# UPDB-manager / SVN 頁面選擇器（依實際 HTML 可改為 CSS/XPath）
+# 目前以「連結/按鈕文字」為主，供 Playwright get_by_role / get_by_text 使用
+
+# ----- UPDB 專案資訊頁 (updb_member_list_emp.php) -----
+link_modify_member_list: "變更成員名單"
+
+# ----- 變更成員名單頁 (updb_member_edit_emp.php) -----
+# 畫面連結文字（與群組對照）：Add Analog..→Analog, Add Digital..→Digital, Add DV..→DV,
+# Add Layout..→Layout, Add APR..→APR, Add CTC DTD..→CTC
+link_add_analog: "Add Analog.."
+link_add_digital: "Add Digital.."
+link_add_dv: "Add DV.."
+link_add_layout: "Add Layout.."
+link_add_apr: "Add APR.."
+link_add_ctc_dtd: "Add CTC DTD.."
+link_add_planner: "Add Planner.."
+link_add_testing: "Add Testing.."
+
+# 彈窗：新增群組成員 (updb_member_edit_select.php)
+# 說明文字旁的輸入框，或 placeholder
+popup_input_employee_ids_placeholder: "請填入欲新增至"
+button_submit: "Submit"
+
+# 頂部導航
+link_svn: "SVN"
+
+# ----- SVN 頁 (svn_page.php) -----
+# 專案列表中的專案連結：以專案代碼為文字（如 RL6665）
+
+# ----- SVN 專案資訊頁 -----
+link_edit_permission: "編輯權限"
+link_change_mail_list: "變更通知信名單"
+
+# ----- SVN 通知信名單頁 (svn_mail_edit.php) -----
+button_set_all_members: "設定所有成員"
+
+# ----- Modify SVN Permission Table -----
+# 工號列表區（textarea 或可編輯區塊）
+input_reason_for_change_label: "此次變更原因"
+link_preview_changes: "預覽變更"
+link_save_changes: "儲存變更"
+# 確認對話框
+dialog_save_all_changes: "Save all changes"
+button_confirm: "確定"
