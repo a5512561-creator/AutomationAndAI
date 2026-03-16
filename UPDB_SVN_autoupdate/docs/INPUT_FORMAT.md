@@ -13,9 +13,24 @@
 | 其餘欄位 | 姓名、分機、部門、Email 等 | 否 |
 
 - **專案名**：例如 `RL6665`。
-- **群組名**：例如 `Digital`、`Analog`，表示要加入該專案下的哪個群組。
-- **SVN**：若第一欄中有 `SVN` 這個字，表示除了專案權限外，還要到 UPDB-manager 的 SVN 頁面加入該工號。
+- **群組名**：表示要加入該專案下的哪個群組，**必須**為下列其一（與 UPDB 畫面「Add XXX..」對應）：
 - **RT**：忽略。
+
+### 群組名（目前支援選項）
+
+| 輸入的群組名 | 說明／對應 UPDB 按鈕 |
+|-------------|----------------------|
+| `Analog`    | Add Analog..         |
+| `Digital`   | Add Digital..        |
+| `DV`        | Add DV..             |
+| `Layout`    | Add Layout..         |
+| `APR`       | Add APR..            |
+| `CTC`       | Add CTC DTD..        |
+| `CTC DTD`   | Add CTC DTD..（同上） |
+| `Planner`   | Add Planner..        |
+| `Testing`   | Add Testing..        |
+
+輸入檔第一欄的群組名若不在上表，程式會記錄「不支援的群組」並略過該筆。
 - **工號**：同仁工號，UPDB-manager 與 SVN 都以此工號加入。
 
 ## 範例

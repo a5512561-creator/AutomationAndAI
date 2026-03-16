@@ -1,22 +1,13 @@
-# UPDV_SVN_autoupdate
+# UPDB_SVN_autoupdate
 
-依文字檔批次將同仁加入 UPDB-manager 專案與群組，並可選是否一併加入 SVN 權限。
+依文字檔批次將同仁加入 UPDB-manager 專案與群組。
 
 ## 文件索引
 
 - **[實作方案](docs/PLAN.md)**：整體架構、技術選型、流程與實作順序（換機後從這裡接續開發）。
 - **[輸入文字檔格式](docs/INPUT_FORMAT.md)**：來源檔欄位說明與範例。
 - **[輸入檔處理流程與每專案分次設定](docs/FLOW_AND_BATCHING.md)**：解析與分組方式、執行順序與「每專案等儲存完成再處理下一個」的說明。
-
-## 上傳至 AutomationAndAI 儲存庫
-
-此專案可放在 [AutomationAndAI](https://github.com/a5512561-creator/AutomationAndAI) 的 `UPDV_SVN_autoupdate` 資料夾內。在**已安裝 Git 且 `git` 在 PATH 中**的 PowerShell 裡，於本專案目錄執行：
-
-```powershell
-.\PUSH_TO_AUTOMATION_AND_AI.ps1
-```
-
-腳本會自動 clone（若尚未存在）AutomationAndAI、將本專案檔案複製到 `AutomationAndAI/UPDV_SVN_autoupdate/`、commit 並 push。
+- **[分享給其他同事使用](docs/SHARING.md)**：同事如何取得程式、安裝環境、用 .bat 或指令執行。
 
 ## 換機後繼續開發
 
@@ -34,12 +25,12 @@
 ## 需求摘要
 
 - **輸入**：文字檔，每行指定「專案、群組、是否加 SVN、工號」。
-- **行為**：以瀏覽器自動化操作 UPDB-manager（登入時由使用者手動完成 OTP），依序選專案、加群組成員，必要時進入 SVN 頁面加入人員。
+- **行為**：以瀏覽器自動化操作 UPDB-manager（登入時由使用者手動完成 OTP），依序選專案、加群組成員。
 - **技術**：Python + Playwright，詳見 `docs/PLAN.md`。
 
 ## 使用方式
 
-1. **安裝依賴**
+1. **安裝依賴**（僅第一次）
    ```bash
    pip install -r requirements.txt
    playwright install chromium
@@ -47,11 +38,9 @@
 2. **設定**（可選）  
    複製 `config.example.yaml` 為 `config.yaml`，設定 `updb_login_url`、`input_file`、`member_add_wait_seconds` 等。
 3. **執行**
-   ```bash
-   python main.py  members.txt
-   ```
-   或僅指定 config 內 `input_file` 時：`python main.py`（須在 config 中設定 `input_file`）。  
-   程式會開啟 Chromium、載入登入頁；請在瀏覽器完成兩階段 OTP 登入後，回到終端按 **Enter**，程式會依文字檔批次執行 UPDB 加成員與 SVN 權限。
+   - **一鍵執行（建議）**：雙擊 `run_updb.bat`（使用範例名單）或把成員名單檔拖到 `run_updb.bat` 上。
+   - **命令列**：`python main.py members.txt` 或 `python main.py`（須在 config 設定 `input_file`）。  
+   程式會開啟 Chromium、載入登入頁；請在瀏覽器完成兩階段 OTP 登入後，回到終端按 **Enter**，程式會依文字檔批次執行 UPDB 加成員。
 4. **選項**
    - `--config -c`：指定設定檔。
    - `--no-continue`：遇錯誤即中斷，不繼續下一筆。
