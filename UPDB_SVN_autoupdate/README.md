@@ -4,29 +4,15 @@
 
 ## 文件索引
 
-- **[實作方案](docs/PLAN.md)**：整體架構、技術選型、流程與實作順序（換機後從這裡接續開發）。
-- **[輸入文字檔格式](docs/INPUT_FORMAT.md)**：來源檔欄位說明與範例。
+- **[輸入文字檔格式](docs/INPUT_FORMAT.md)**：來源檔欄位說明與範例、支援的群組名。
 - **[輸入檔處理流程與每專案分次設定](docs/FLOW_AND_BATCHING.md)**：解析與分組方式、執行順序與「每專案等儲存完成再處理下一個」的說明。
 - **[分享給其他同事使用](docs/SHARING.md)**：同事如何取得程式、安裝環境、用 .bat 或指令執行。
-
-## 換機後繼續開發
-
-1. 克隆或拉取 AutomationAndAI（或本專案）後，先閱讀 `docs/PLAN.md` 了解需求與實作步驟。
-2. 若為獨立儲存庫且尚未初始化 Git，可執行：
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial: docs and project layout"
-   git remote add origin <你的遠端倉庫 URL>
-   git push -u origin main
-   ```
-3. 依 `docs/PLAN.md` 的「實作順序建議」從步驟 1 開始實作程式碼。
 
 ## 需求摘要
 
 - **輸入**：文字檔，每行指定「專案、群組、是否加 SVN、工號」。
 - **行為**：以瀏覽器自動化操作 UPDB-manager（登入時由使用者手動完成 OTP），依序選專案、加群組成員。
-- **技術**：Python + Playwright，詳見 `docs/PLAN.md`。
+- **技術**：Python + Playwright。
 
 ## 使用方式
 
@@ -58,4 +44,4 @@
 
 ## 選擇器與 E2E 測試
 
-頁面操作依 `selectors.yaml` 的連結/按鈕文字（如「變更成員名單」「Add Digital..」「SVN」「編輯權限」等）進行。若 UPDB-manager 或 SVN 頁改版導致點擊失敗，可依實際 HTML 調整 `selectors.yaml` 或 `browser_ops.py` 內對應選擇器。建議以單筆或少量資料先做一次端對端測試確認流程。
+頁面操作依 `selectors.yaml` 的連結/按鈕文字（如「變更成員名單」「Add Digital..」「儲存變更」等）進行。若 UPDB-manager 改版導致點擊失敗，可依實際 HTML 調整 `selectors.yaml` 或 `browser_ops.py`。建議以單筆或少量資料先做一次端對端測試確認流程。
