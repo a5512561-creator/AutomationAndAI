@@ -17,6 +17,7 @@ from browser_ops import (
     go_to_project_updb,
     go_to_modify_member_list,
     add_members_to_group,
+    save_member_list_changes,
 )
 
 
@@ -94,7 +95,9 @@ def run(
             input()
             # 登入後若停留在 main_page.php 可能觸發「重新導向次數過多」，改為立即導向第一個專案 UPDB 頁以避開
             time.sleep(1)
-            first_project = batches[0][0]
+            # 依專案分組：同一專案內先加完所有群組再按一次「儲存變更」
+            projects_order = list(dict.fromkeys(b[0] for b in batches))
+            first_project = projects_order[0]
             logger.info("登入後立即導向專案頁以避開重新導向迴圈: %s", first_project)
             go_to_project_updb(page, first_project, base_url)
             go_to_modify_member_list(page, first_project, base_url, selectors)
@@ -102,26 +105,40 @@ def run(
             success_updb = 0
             fail_updb = 0
 
-            for project, group, employee_ids in batches:
+            for project in projects_order:
+                project_batches = [(g, ids) for p, g, ids in batches if p == project]
                 try:
                     if current_project != project:
                         go_to_project_updb(page, project, base_url)
                         go_to_modify_member_list(page, project, base_url, selectors)
                         current_project = project
 
-                    ok = add_members_to_group(
-                        page, context, project, group, employee_ids,
-                        base_url, selectors, wait_seconds
-                    )
-                    if ok:
-                        success_updb += 1
-                    else:
+                    for group, employee_ids in project_batches:
+                        try:
+                            ok = add_members_to_group(
+                                page, context, project, group, employee_ids,
+                                base_url, selectors, wait_seconds,
+                                save_after=False,
+                            )
+                            if ok:
+                                success_updb += 1
+                            else:
+                                fail_updb += 1
+                                if not continue_on_error:
+                                    raise RuntimeError(f"UPDB 加人失敗: {project} / {group}")
+                        except Exception as e:
+                            logger.exception("批次失敗 %s / %s: %s", project, group, e)
+                            fail_updb += 1
+                            if not continue_on_error:
+                                raise
+
+                    # 同一專案所有群組都加完後，按一次「儲存變更」
+                    if not save_member_list_changes(page, context, selectors):
                         fail_updb += 1
                         if not continue_on_error:
-                            raise RuntimeError(f"UPDB 加人失敗: {project} / {group}")
+                            raise RuntimeError(f"UPDB 儲存變更失敗: {project}")
                 except Exception as e:
-                    logger.exception("批次失敗 %s / %s: %s", project, group, e)
-                    fail_updb += 1
+                    logger.exception("專案 %s 處理失敗: %s", project, e)
                     if not continue_on_error:
                         raise
 

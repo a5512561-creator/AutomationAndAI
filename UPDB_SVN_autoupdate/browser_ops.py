@@ -99,18 +99,47 @@ def go_to_modify_member_list(page, project: str, base_url: str, selectors: dict)
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
 
+def save_member_list_changes(page, context, selectors: dict) -> bool:
+    """
+    在「變更成員名單」頁面上按「儲存變更」：接受 confirm、等待 process 視窗開啟並關閉（約 3～5 分鐘）。
+    同一專案多群組時，應在全部 add_members_to_group(..., save_after=False) 完成後呼叫一次即可。
+    """
+    try:
+        save_text = selectors.get("link_save_changes", "儲存變更")
+
+        def _accept_dialog(dialog):
+            try:
+                dialog.accept()
+            except Exception:
+                pass  # 若已被處理則忽略（e.g. "already handled"）
+
+        page.once("dialog", _accept_dialog)
+        with context.expect_page(timeout=10000) as process_info:
+            page.locator("a").filter(has_text=save_text).first.click()
+        process_page = process_info.value
+        logger.info("儲存變更處理中（Stage 2 更新 UPDB…），請勿手動關閉視窗，約 3～5 分鐘…")
+        process_page.wait_for_event("close", timeout=330000)
+        page.wait_for_timeout(1000)
+        return True
+    except Exception as e:
+        logger.exception("save_member_list_changes 失敗: %s", e)
+        return False
+
+
 def add_members_to_group(
     page,
     context,
     project: str,
     group: str,
-    employee_ids: List[str],
+    employee_ids: list,
     base_url: str,
     selectors: dict,
     wait_seconds: int = 180,
+    save_after: bool = True,
 ) -> bool:
     """
-    點「Add {Group}..」→ 彈窗填工號（逗號分隔）→ Submit → 等待 wait_seconds → 驗證成員出現。
+    點「Add {Group}..」→ 彈窗填工號（逗號分隔）→ Submit → 等待小視窗關閉。
+    若 save_after=True，再點「儲存變更」並等 process 視窗關閉（約 3～5 分鐘）；若 False 僅加人不儲存（同一專案多群組時，最後再呼叫 save_member_list_changes 一次）。
     回傳是否成功。
     """
     link_key = GROUP_LINK_KEYS.get(group)
@@ -160,19 +189,11 @@ def add_members_to_group(
             except Exception:
                 pass
         page.wait_for_load_state("domcontentloaded", timeout=10000)
-        # 必須按「儲存變更」才會寫入 UPDB；會跳出 confirm，確定後開 updb_member_edit_process_emp.php 視窗（Stage 2…更新UPDB資料庫），約 3～5 分鐘才關閉
-        save_text = selectors.get("link_save_changes", "儲存變更")
-        page.once("dialog", lambda dialog: dialog.accept())
-        with context.expect_page(timeout=10000) as process_info:
-            page.locator("a").filter(has_text=save_text).first.click()
-        try:
-            process_page = process_info.value
-            logger.info("儲存變更處理中（Stage 2 更新 UPDB…），請勿手動關閉視窗，約 3～5 分鐘…")
-            process_page.wait_for_event("close", timeout=330000)
-        except Exception:
-            pass
-        page.wait_for_timeout(1000)
-        logger.info("Add %s 流程完成，已按儲存變更", group)
+        if save_after:
+            save_member_list_changes(page, context, selectors)
+            logger.info("Add %s 流程完成，已按儲存變更", group)
+        else:
+            logger.info("Add %s 流程完成（尚未儲存，待同專案全部群組加完再儲存）", group)
         return True
     except Exception as e:
         logger.exception("add_members_to_group 失敗: %s", e)

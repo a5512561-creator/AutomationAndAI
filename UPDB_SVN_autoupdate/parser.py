@@ -56,6 +56,10 @@ def parse_line(line: str, line_number: int) -> Record | None:
         logger.warning("第 %d 行：第一欄至少需「專案 群組」兩個 token，跳過: %r", line_number, first_col)
         return None
 
+    if tokens[0].startswith("#"):
+        logger.debug("第 %d 行：第一欄為註解，跳過: %r", line_number, first_col[:50])
+        return None
+
     project = tokens[0]
     group = tokens[1]
     add_svn = "SVN" in tokens
