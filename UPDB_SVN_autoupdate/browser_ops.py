@@ -191,9 +191,9 @@ def add_members_to_group(
         page.wait_for_load_state("domcontentloaded", timeout=10000)
         if save_after:
             save_member_list_changes(page, context, selectors)
-            logger.info("Add %s 流程完成，已按儲存變更", group)
+            logger.info("Add %s %s 流程完成，已按儲存變更", group, ids_str)
         else:
-            logger.info("Add %s 流程完成（尚未儲存，待同專案全部群組加完再儲存）", group)
+            logger.info("Add %s %s 流程完成（尚未儲存，待同專案全部群組加完再儲存）", group, ids_str)
         return True
     except Exception as e:
         logger.exception("add_members_to_group 失敗: %s", e)

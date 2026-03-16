@@ -11,7 +11,7 @@
 開啟 PowerShell 或命令提示字元，執行：
 
 ```powershell
-cd d:\CursorProject\Weekly_Report_Checker
+cd D:\AutomationAndAI\weekly_report_checker
 git init
 ```
 
@@ -33,4 +33,4 @@ git branch -M main
 git push -u origin main
 ```
 
-之後的版控都在 `d:\CursorProject\Weekly_Report_Checker` 目錄下使用 `git add`、`git commit`、`git push` 等指令即可。
+之後的版控都在 `D:\AutomationAndAI\weekly_report_checker` 目錄下使用 `git add`、`git commit`、`git push` 等指令即可。
