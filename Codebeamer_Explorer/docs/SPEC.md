@@ -61,6 +61,35 @@ python script/read_cb_hw2_titles.py
 1. 讀取 `CB_TEST_ITEM_ID` 對應的單一 item 並印出 JSON 摘要（確認連線與結構）。
 2. 依目前模式掃描 tracker、比對 `CB_TARGET_COMPONENT_NAMES`（或程式內建預設），並列出符合項目的 id/name；若 `CB_LIST_FIRST_LEVEL_ONLY=0`，會再抓每個符合項目的 children 並列出。
 
+## 4.1 由 DOCX 新增項目（測試程式）
+
+此功能用於驗證「由 Word 規格書建立 tracker 樹狀項目」的流程。
+
+### 需要的 .env 參數
+
+- `CB_BASE_URL`, `CB_TRACKER_ID`, `CB_USERNAME/CB_PASSWORD`（或 `CB_TOKEN`）
+- `CB_DOCX_PATH`：要讀取的 docx 完整路徑（建議用絕對路徑）
+
+### 行為規則（對應你的測試流程）
+
+- **Hardware Component（父項）**：由檔名擷取，例如 `..._PaddyTest.docx` ⇒ `PaddyTest`，Category = `Hardware Component`
+- **章節節點**：依 Word 標題編號（如 `1`, `1.1`, `2`, `2.1`, `3`, `3.1`）建立節點，Category = `Information`
+- **2.1 Hardware Part**：在 `2.1` 區段內掃描表格文字，擷取 `HWP_\\d+`（如 `HWP_1`, `HWP_2`），建立於 `2.1` 節點底下，Category = `Hardware Part`
+
+### 執行方式
+
+- 只解析、不呼叫 API（建議先跑確認解析正確）：
+
+```bash
+python script/create_cb_items_from_docx.py --dry-run
+```
+
+- 實際建立（會呼叫 POST/PUT 變更 Codebeamer；為避免誤建，需加 `--force`）：
+
+```bash
+python script/create_cb_items_from_docx.py --apply --force
+```
+
 ## 5. 行為模式（目前兩種）
 
 - **只列第一層（不展開）**  
