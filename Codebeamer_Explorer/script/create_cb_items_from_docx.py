@@ -254,6 +254,25 @@ def cb_put_json(url: str, payload: Dict[str, Any]) -> Any:
     return resp.json()
 
 
+def cb_patch_json(url: str, payload: Dict[str, Any]) -> Any:
+    auth_kwargs = build_auth_and_headers()
+    headers = dict(auth_kwargs["headers"])
+    headers["Content-Type"] = "application/json"
+    resp = requests.patch(url, json=payload, timeout=60, verify=True, headers=headers, auth=auth_kwargs["auth"])
+    if resp.status_code >= 400:
+        raise RuntimeError(f"PATCH {url} failed: {resp.status_code} {resp.text}")
+    return resp.json() if resp.text else None
+
+
+def insert_child(base_url: str, parent_id: int, child_id: int, *, index: int) -> None:
+    """
+    強制縮排/順序：將既有 child 插入到指定 parent 的 children list 位置。
+    Endpoint: PATCH /v3/items/{parentId}/children?mode=INSERT
+    """
+    url = f"{base_url}/items/{parent_id}/children?mode=INSERT"
+    payload = {"itemReference": {"id": child_id, "type": "TrackerItemReference"}, "index": index}
+    cb_patch_json(url, payload)
+
 def find_tracker_field_ids(base_url: str, tracker_id: int) -> Tuple[int, int]:
     """
     找出 Category 與 Parent 欄位的 fieldId。
@@ -345,6 +364,7 @@ def apply_tree_to_codebeamer(
     tree: Node,
     *,
     force: bool,
+    reindent: bool,
 ) -> int:
     category_field_id, _parent_field_id = find_tracker_field_ids(base_url, tracker_id)
 
@@ -364,10 +384,11 @@ def apply_tree_to_codebeamer(
             return cat_hw_part
         return cat_information
 
-    created_ids: Dict[int, int] = {}
+    created: Dict[int, int] = {}
 
     def _create_recursive(node: Node, parent_id: Optional[int]) -> int:
         item_id = create_item_in_tracker(base_url, tracker_id, node.name, parent_id=parent_id)
+        created[id(node)] = item_id
         field_values: List[Dict[str, Any]] = [build_choice_field_value(category_field_id, _category_option_id(node.category))]
         update_item_fields(base_url, item_id, field_values)
 
@@ -376,6 +397,17 @@ def apply_tree_to_codebeamer(
         return item_id
 
     root_id = _create_recursive(tree, None)
+
+    if reindent:
+        # 某些 tracker 的 UI/模型對 parent 欄位不敏感，建立後再用 children INSERT 強制縮排與順序。
+        def _reindent(node: Node) -> None:
+            parent_item_id = created[id(node)]
+            for idx, child in enumerate(node.children):
+                insert_child(base_url, parent_item_id, created[id(child)], index=idx)
+                _reindent(child)
+
+        _reindent(tree)
+
     return root_id
 
 
@@ -386,6 +418,7 @@ def main(argv: List[str]) -> None:
     parser.add_argument("--debug-docx", action="store_true", help="除錯：額外列出 2.1 區段 table 前幾個 cell 文字")
     parser.add_argument("--apply", action="store_true", help="實際呼叫 API 建立項目（需要 --force）")
     parser.add_argument("--force", action="store_true", help="允許建立（避免重複建立保護）")
+    parser.add_argument("--no-reindent", action="store_true", help="建立後不做 children INSERT 重排（預設會重排）")
     args = parser.parse_args(argv)
 
     docx_path = args.docx_path.strip().strip('"')
@@ -410,7 +443,7 @@ def main(argv: List[str]) -> None:
     if args.dry_run or not args.apply:
         return
 
-    root_id = apply_tree_to_codebeamer(base_url, tracker_id, tree, force=args.force)
+    root_id = apply_tree_to_codebeamer(base_url, tracker_id, tree, force=args.force, reindent=not args.no_reindent)
     print(f"\n完成。根節點 itemId={root_id}")
 
 

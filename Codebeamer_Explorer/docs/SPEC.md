@@ -90,6 +90,12 @@ python script/create_cb_items_from_docx.py --dry-run
 python script/create_cb_items_from_docx.py --apply --force
 ```
 
+預設會在建立完成後再用 children API 強制重排縮排/順序（避免某些 tracker UI 不依 parent 顯示）。若你確定不需要重排，可加：
+
+```bash
+python script/create_cb_items_from_docx.py --apply --force --no-reindent
+```
+
 ## 4.2 依 Word 編號重排縮排（既有項目）
 
 若你已建立項目但 UI 左側樹狀縮排不符合 Word 編號（例如 `1.1` 沒縮在 `1` 底下），可使用 children API 重新掛載既有節點。
