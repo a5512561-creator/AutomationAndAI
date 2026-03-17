@@ -335,14 +335,25 @@ def build_choice_field_value(field_id: int, option_id: int, field_name: str = "C
     }
 
 
-def build_parent_field_value(field_id: int, parent_item_id: int, field_name: str = "Parent") -> Dict[str, Any]:
-    # Parent 欄位通常是 reference，這裡用 TrackerItemReference
-    return {
-        "fieldId": field_id,
-        "type": "TrackerItemReferenceFieldValue",
-        "name": field_name,
-        "values": [{"id": parent_item_id, "type": "TrackerItemReference"}],
-    }
+def build_parent_field_value(
+    *,
+    field_id: int,
+    value_model: str,
+    parent_item_id: int,
+    field_name: str = "Parent",
+    use_values: bool = True,
+) -> Dict[str, Any]:
+    """
+    Parent 欄位在不同 Codebeamer 版本中，FieldValue 的 type 名稱可能不同，
+    需以 /trackers/{trackerId}/fields/{fieldId} 回傳的 valueModel 為準。
+    """
+    ref = {"id": parent_item_id, "type": "TrackerItemReference"}
+    payload: Dict[str, Any] = {"fieldId": field_id, "type": value_model, "name": field_name}
+    if use_values:
+        payload["values"] = [ref]
+    else:
+        payload["value"] = ref
+    return payload
 
 
 def apply_tree_to_codebeamer(
@@ -353,6 +364,13 @@ def apply_tree_to_codebeamer(
     force: bool,
 ) -> int:
     category_field_id, parent_field_id = find_tracker_field_ids(base_url, tracker_id)
+    parent_field_def = cb_get_json(f"{base_url}/trackers/{tracker_id}/fields/{parent_field_id}")
+    parent_value_model = (parent_field_def.get("valueModel") or "").strip()
+    parent_field_name = (parent_field_def.get("name") or "Parent").strip()
+    # 多數 reference 欄位使用 values(list)。若遇到版本差異，可改成 False（使用 value）。
+    parent_use_values = True
+    if not parent_value_model:
+        raise RuntimeError("Parent 欄位 definition 未提供 valueModel，無法決定 fieldValues.type")
 
     cat_hw_component = get_choice_option_id_by_name(base_url, tracker_id, category_field_id, "Hardware Component")
     cat_hw_part = get_choice_option_id_by_name(base_url, tracker_id, category_field_id, "Hardware Part")
@@ -376,7 +394,15 @@ def apply_tree_to_codebeamer(
         item_id = create_item_in_tracker(base_url, tracker_id, node.name)
         field_values: List[Dict[str, Any]] = [build_choice_field_value(category_field_id, _category_option_id(node.category))]
         if parent_id is not None:
-            field_values.append(build_parent_field_value(parent_field_id, parent_id))
+            field_values.append(
+                build_parent_field_value(
+                    field_id=parent_field_id,
+                    value_model=parent_value_model,
+                    parent_item_id=parent_id,
+                    field_name=parent_field_name,
+                    use_values=parent_use_values,
+                )
+            )
         update_item_fields(base_url, item_id, field_values)
 
         for child in node.children:
