@@ -314,8 +314,12 @@ def get_choice_option_id_by_name(base_url: str, tracker_id: int, field_id: int, 
     raise RuntimeError(f"找不到 Category 選項：{option_name}（請確認 tracker 的 Category option 名稱完全一致）")
 
 
-def create_item_in_tracker(base_url: str, tracker_id: int, name: str) -> int:
-    created = cb_post_json(f"{base_url}/trackers/{tracker_id}/items", {"name": name})
+def create_item_in_tracker(base_url: str, tracker_id: int, name: str, *, parent_id: Optional[int] = None) -> int:
+    payload: Dict[str, Any] = {"name": name}
+    if parent_id is not None:
+        # 使用建立時指定 parent 來建立樹狀（避免某些版本不支援用 /fields 更新 Parent）
+        payload["parent"] = {"id": parent_id, "type": "TrackerItemReference"}
+    created = cb_post_json(f"{base_url}/trackers/{tracker_id}/items", payload)
     item_id = created.get("id")
     if not isinstance(item_id, int):
         raise RuntimeError(f"建立 item 失敗，回傳沒有 id：{created}")
@@ -335,27 +339,6 @@ def build_choice_field_value(field_id: int, option_id: int, field_name: str = "C
     }
 
 
-def build_parent_field_value(
-    *,
-    field_id: int,
-    value_model: str,
-    parent_item_id: int,
-    field_name: str = "Parent",
-    use_values: bool = True,
-) -> Dict[str, Any]:
-    """
-    Parent 欄位在不同 Codebeamer 版本中，FieldValue 的 type 名稱可能不同，
-    需以 /trackers/{trackerId}/fields/{fieldId} 回傳的 valueModel 為準。
-    """
-    ref = {"id": parent_item_id, "type": "TrackerItemReference"}
-    payload: Dict[str, Any] = {"fieldId": field_id, "type": value_model, "name": field_name}
-    if use_values:
-        payload["values"] = [ref]
-    else:
-        payload["value"] = ref
-    return payload
-
-
 def apply_tree_to_codebeamer(
     base_url: str,
     tracker_id: int,
@@ -363,14 +346,7 @@ def apply_tree_to_codebeamer(
     *,
     force: bool,
 ) -> int:
-    category_field_id, parent_field_id = find_tracker_field_ids(base_url, tracker_id)
-    parent_field_def = cb_get_json(f"{base_url}/trackers/{tracker_id}/fields/{parent_field_id}")
-    parent_value_model = (parent_field_def.get("valueModel") or "").strip()
-    parent_field_name = (parent_field_def.get("name") or "Parent").strip()
-    # 多數 reference 欄位使用 values(list)。若遇到版本差異，可改成 False（使用 value）。
-    parent_use_values = True
-    if not parent_value_model:
-        raise RuntimeError("Parent 欄位 definition 未提供 valueModel，無法決定 fieldValues.type")
+    category_field_id, _parent_field_id = find_tracker_field_ids(base_url, tracker_id)
 
     cat_hw_component = get_choice_option_id_by_name(base_url, tracker_id, category_field_id, "Hardware Component")
     cat_hw_part = get_choice_option_id_by_name(base_url, tracker_id, category_field_id, "Hardware Part")
@@ -391,18 +367,8 @@ def apply_tree_to_codebeamer(
     created_ids: Dict[int, int] = {}
 
     def _create_recursive(node: Node, parent_id: Optional[int]) -> int:
-        item_id = create_item_in_tracker(base_url, tracker_id, node.name)
+        item_id = create_item_in_tracker(base_url, tracker_id, node.name, parent_id=parent_id)
         field_values: List[Dict[str, Any]] = [build_choice_field_value(category_field_id, _category_option_id(node.category))]
-        if parent_id is not None:
-            field_values.append(
-                build_parent_field_value(
-                    field_id=parent_field_id,
-                    value_model=parent_value_model,
-                    parent_item_id=parent_id,
-                    field_name=parent_field_name,
-                    use_values=parent_use_values,
-                )
-            )
         update_item_fields(base_url, item_id, field_values)
 
         for child in node.children:
