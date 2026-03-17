@@ -90,6 +90,28 @@ python script/create_cb_items_from_docx.py --dry-run
 python script/create_cb_items_from_docx.py --apply --force
 ```
 
+## 4.2 依 Word 編號重排縮排（既有項目）
+
+若你已建立項目但 UI 左側樹狀縮排不符合 Word 編號（例如 `1.1` 沒縮在 `1` 底下），可使用 children API 重新掛載既有節點。
+
+此腳本會呼叫：
+
+- `PATCH /v3/items/{parentId}/children?mode=INSERT`
+
+### 執行方式
+
+- 先看將執行的搬移計畫（不會改動）：
+
+```bash
+python script/reindent_cb_items.py
+```
+
+- 真的套用重排（會改動 Codebeamer）：
+
+```bash
+python script/reindent_cb_items.py --apply
+```
+
 ## 5. 行為模式（目前兩種）
 
 - **只列第一層（不展開）**  
