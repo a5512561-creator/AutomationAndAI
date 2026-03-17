@@ -19,14 +19,12 @@ TEST_ITEM_ID = int(os.getenv("CB_TEST_ITEM_ID", "0"))
 # （可選）用來直接呼叫 list API 的完整網址（含 page/pageSize）
 TRACKER_ITEMS_URL_OVERRIDE = os.getenv("CB_TRACKER_ITEMS_URL") or None
 
-# 環境切換：test = 測試區預設名稱，formal 或空 = 正式區預設名稱
-CB_ENV = (os.getenv("CB_ENV") or "").strip().lower()
-# （可選）要比對的 component 名稱；有值則覆蓋 CB_ENV 的預設
+# （可選）要比對的 component 名稱；多個名稱可用半形逗號或分號分隔（名稱內含逗號時請改用分號）
 # 多個名稱可用半形逗號或分號分隔（名稱內含逗號時請改用分號）
 CB_TARGET_COMPONENT_NAMES_RAW = (os.getenv("CB_TARGET_COMPONENT_NAMES") or "").strip()
 # （可選）若設為正整數，只印出 tracker 前 N 筆 item 的 id/name，方便複製到 CB_TARGET_COMPONENT_NAMES；不設則照常跑比對
 CB_LIST_FIRST_N = int(os.getenv("CB_LIST_FIRST_N", "0") or "0")
-# 設為 1 時，只依 CB_TARGET_COMPONENT_NAMES（或 CB_ENV 預設）列出符合項目的 id/name，不展開 children
+# 設為 1 時，只依 CB_TARGET_COMPONENT_NAMES（或程式內建預設）列出符合項目的 id/name，不展開 children
 CB_LIST_FIRST_LEVEL_ONLY = (os.getenv("CB_LIST_FIRST_LEVEL_ONLY") or "").strip() in ("1", "true", "yes")
 
 # 預設使用 Basic Auth，帳密從環境變數讀取
@@ -233,24 +231,21 @@ def list_top_level_components() -> None:
         print("\n可將上列 name 複製到 .env 的 CB_TARGET_COMPONENT_NAMES（多個用分號 ; 分隔）。")
         return
 
-    # 要比對的 component 名稱：優先用 .env 的 CB_TARGET_COMPONENT_NAMES，否則依 CB_ENV 用預設
+    # 要比對的 component 名稱：優先用 .env 的 CB_TARGET_COMPONENT_NAMES，否則用固定預設（formal）
     if CB_TARGET_COMPONENT_NAMES_RAW:
         sep = ";" if ";" in CB_TARGET_COMPONENT_NAMES_RAW else ","
         target_keywords = [s.strip() for s in CB_TARGET_COMPONENT_NAMES_RAW.split(sep) if s.strip()]
     else:
-        if CB_ENV == "test":
-            target_keywords = ["HwCom_81", "[SWITCH] top view"]
-        else:
-            target_keywords = [
-                "[Template] HW Component Name (Design Doc.)",
-                "[SWITCH] top view",
-            ]
+        target_keywords = [
+            "[Template] HW Component Name (Design Doc.)",
+            "[SWITCH] top view",
+        ]
 
     if not target_keywords:
-        print("未設定要比對的 component 名稱（請設 CB_TARGET_COMPONENT_NAMES 或 CB_ENV=test|formal）。\n")
+        print("未設定要比對的 component 名稱（請設 CB_TARGET_COMPONENT_NAMES）。\n")
         return
 
-    print(f"環境: CB_ENV={CB_ENV or '(未設)'}，要比對的 component: {target_keywords}\n")
+    print(f"要比對的 component: {target_keywords}\n")
 
     def _norm(s: str) -> str:
         return (s or "").replace("\n", " ").replace("\r", " ").strip()
@@ -325,7 +320,6 @@ def main(argv: List[str]) -> None:
     else:
         print(f"Tracker ID: {TRACKER_ID}")
     print(f"Page size: {PAGE_SIZE}")
-    print(f"CB_ENV: {CB_ENV or '(未設)'}")
     print()
 
     # 先印出單一 item（確認連線 OK）

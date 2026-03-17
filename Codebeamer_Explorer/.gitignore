@@ -9,3 +9,7 @@ __pycache__/
 venv/
 .env.local
 *.log
+
+# Docs (避免誤把文件/Office 暫存檔提交)
+docs/*.docx
+docs/~$*.docx

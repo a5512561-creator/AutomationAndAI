@@ -45,8 +45,7 @@ pip install -r requirements.txt
 | 參數 | 說明 | 範例 |
 |------|------|------|
 | `CB_LIST_FIRST_LEVEL_ONLY` | `1` = 只列出符合名稱的項目 id/name，不抓 children；`0` 或未設 = 會再抓每個符合項目的 children 並列出 | `1` |
-| `CB_TARGET_COMPONENT_NAMES` | 要比對的「項目名稱」清單，對應 API 的 `name` 欄位；多個用分號 `;` 分隔。留空則依 `CB_ENV` 用預設；填了則只找這些名稱（須與 API 回傳的 name 完全一致，不要加 `id=xxx`） | `HwCom_81; [SWITCH] top view` |
-| `CB_ENV` | `CB_TARGET_COMPONENT_NAMES` 留空時使用的預設名稱：`test` = 測試區預設；`formal` 或未設 = 正式區預設 | `test` |
+| `CB_TARGET_COMPONENT_NAMES` | 要比對的「項目名稱」清單，對應 API 的 `name` 欄位；多個用分號 `;` 分隔。留空則使用程式內建預設（已統一為 formal）；填了則只找這些名稱（須與 API 回傳的 name 完全一致，不要加 `id=xxx`） | `HwCom_81; [SWITCH] top view` |
 | `CB_LIST_FIRST_N` | （除錯用）設為正整數時，只印出 tracker 前 N 筆 item 的 id/name，方便複製到 `CB_TARGET_COMPONENT_NAMES` | `50` |
 
 ## 4. 執行方式
@@ -60,12 +59,12 @@ python script/read_cb_hw2_titles.py
 程式會：
 
 1. 讀取 `CB_TEST_ITEM_ID` 對應的單一 item 並印出 JSON 摘要（確認連線與結構）。
-2. 依目前模式掃描 tracker、比對 `CB_TARGET_COMPONENT_NAMES`（或 `CB_ENV` 預設），並列出符合項目的 id/name；若 `CB_LIST_FIRST_LEVEL_ONLY=0`，會再抓每個符合項目的 children 並列出。
+2. 依目前模式掃描 tracker、比對 `CB_TARGET_COMPONENT_NAMES`（或程式內建預設），並列出符合項目的 id/name；若 `CB_LIST_FIRST_LEVEL_ONLY=0`，會再抓每個符合項目的 children 並列出。
 
 ## 5. 行為模式（目前兩種）
 
 - **只列第一層（不展開）**  
-  `CB_LIST_FIRST_LEVEL_ONLY=1`：掃描整個 tracker 的 itemRefs，以「名稱完全一致」比對 `CB_TARGET_COMPONENT_NAMES`（或 `CB_ENV` 預設），只輸出符合項目的 id/name，不呼叫各 item 的 children。
+  `CB_LIST_FIRST_LEVEL_ONLY=1`：掃描整個 tracker 的 itemRefs，以「名稱完全一致」比對 `CB_TARGET_COMPONENT_NAMES`（或程式內建預設），只輸出符合項目的 id/name，不呼叫各 item 的 children。
 
 - **列出並展開 children**  
   `CB_LIST_FIRST_LEVEL_ONLY=0` 或未設：同上比對後，對每個符合的 item 再呼叫 API 取得其 children，並列出每個子項目的 id/name。
