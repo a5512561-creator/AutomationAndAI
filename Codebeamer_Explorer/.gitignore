@@ -1,0 +1,11 @@
+# 勿將含帳密的本機設定提交版控
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env.local
+*.log
