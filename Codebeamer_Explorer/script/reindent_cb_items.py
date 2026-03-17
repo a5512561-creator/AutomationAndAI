@@ -58,6 +58,7 @@ def main(argv: list[str]) -> None:
 
     # 你提供的 itemId（此腳本只做重排，不建立新 item）
     ids = {
+        "root": 585494,  # PaddyTest（根節點）
         "h1": 585496,  # 1 Introduction
         "h11": 585498,  # 1.1 Abbreviation and anonymous
         "h2": 585500,  # 2 Architecture
@@ -69,6 +70,9 @@ def main(argv: list[str]) -> None:
     }
 
     print("將執行的重排動作：")
+    print(f"- move {ids['h1']} under {ids['root']}")
+    print(f"- move {ids['h2']} under {ids['root']}")
+    print(f"- move {ids['h3']} under {ids['root']}")
     print(f"- move {ids['h11']} under {ids['h1']}")
     print(f"- move {ids['h21']} under {ids['h2']}")
     print(f"- move {ids['hwp1']} under {ids['h21']}")
@@ -81,6 +85,9 @@ def main(argv: list[str]) -> None:
         return
 
     # 任一步失敗就停止，方便手動清理
+    insert_child(base_url, ids["root"], ids["h1"], index=0)
+    insert_child(base_url, ids["root"], ids["h2"], index=1)
+    insert_child(base_url, ids["root"], ids["h3"], index=2)
     insert_child(base_url, ids["h1"], ids["h11"], index=0)
     insert_child(base_url, ids["h2"], ids["h21"], index=0)
     insert_child(base_url, ids["h21"], ids["hwp1"], index=0)
