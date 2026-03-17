@@ -32,8 +32,44 @@ class Node:
     children: List["Node"] = field(default_factory=list)
 
 
-HWP_TOKEN_RE = re.compile(r"\bHWP_\d+\b")
-HEADING_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)\s+(.+?)\s*$")
+# 支援 "HWP_1" 與 "HWP 1"（docx 表格常見會用空白）
+HWP_TOKEN_RE = re.compile(r"\bHWP(?:_|\s+)(\d+)\b", re.IGNORECASE)
+# 允許常見格式：
+# - "1 Introduction"
+# - "1. Introduction"
+# - "2.1 Hardware Part Description"
+# - "2.1. Hardware Part Description"
+HEADING_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)(?:\.)?\s+(.+?)\s*$")
+
+
+def get_paragraph_list_ilvl(paragraph: Paragraph) -> Optional[int]:
+    """
+    若此段落使用 Word 的「清單自動編號」，會有 numPr/ilvl。
+    python-docx 的 paragraph.text 通常不包含編號（例如 1. / 1.1.），需從 XML 取得層級。
+    """
+    p = paragraph._p  # noqa: SLF001 (python-docx internal)
+    ppr = p.pPr
+    if ppr is None or ppr.numPr is None or ppr.numPr.ilvl is None:
+        return None
+    try:
+        return int(ppr.numPr.ilvl.val)  # type: ignore[attr-defined]
+    except Exception:
+        return None
+
+
+def increment_numbering(counters: List[int], level: int) -> str:
+    """
+    以 level(1-based) 更新 counters 並回傳章節號，例如 1、1.1、2、2.1。
+    """
+    if level <= 0:
+        level = 1
+    while len(counters) < level:
+        counters.append(0)
+    counters[level - 1] += 1
+    for i in range(level, len(counters)):
+        counters[i] = 0
+    parts = [str(c) for c in counters[:level] if c > 0]
+    return ".".join(parts)
 
 
 def _norm_space(s: str) -> str:
@@ -65,7 +101,7 @@ def extract_component_name_from_filename(docx_path: str) -> str:
     return stem.split("_")[-1].strip() or stem
 
 
-def parse_docx_to_tree(docx_path: str) -> Tuple[str, Node]:
+def parse_docx_to_tree(docx_path: str, *, debug_docx: bool = False) -> Tuple[str, Node]:
     """
     解析 docx 產生樹狀結構（不呼叫 API）。
     - 根節點：Hardware Component（由檔名擷取）
@@ -79,11 +115,14 @@ def parse_docx_to_tree(docx_path: str) -> Tuple[str, Node]:
 
     # 以 heading level 管理 stack：[(level, node)]
     stack: List[Tuple[int, Node]] = [(0, root)]
+    numbering_counters: List[int] = []
 
     in_hw_part_section = False
     hw_part_anchor_level: Optional[int] = None
     hw_part_anchor_node: Optional[Node] = None
+    hw_part_target_node: Optional[Node] = None
     hw_parts_found: List[str] = []
+    debug_cell_samples: List[str] = []
 
     def _maybe_close_hw_section(new_heading_level: int) -> None:
         nonlocal in_hw_part_section, hw_part_anchor_level, hw_part_anchor_node
@@ -103,13 +142,19 @@ def parse_docx_to_tree(docx_path: str) -> Tuple[str, Node]:
             if not text:
                 continue
 
-            m = HEADING_RE.match(text)
-            if not m:
-                continue
-
-            numbering = m.group(1)
-            title = m.group(2)
-            level = numbering.count(".") + 1
+            ilvl = get_paragraph_list_ilvl(block)
+            if ilvl is not None:
+                level = ilvl + 1
+                numbering = increment_numbering(numbering_counters, level)
+                title = text
+            else:
+                # fallback：若有人把編號打在文字內，仍可吃到
+                m = HEADING_RE.match(text)
+                if not m:
+                    continue
+                numbering = m.group(1)
+                title = m.group(2)
+                level = numbering.count(".") + 1
 
             _maybe_close_hw_section(level)
 
@@ -125,6 +170,8 @@ def parse_docx_to_tree(docx_path: str) -> Tuple[str, Node]:
                 in_hw_part_section = True
                 hw_part_anchor_level = level
                 hw_part_anchor_node = node
+                hw_part_target_node = node
+                hw_parts_found.clear()
 
         elif isinstance(block, Table):
             if not in_hw_part_section or not hw_part_anchor_node:
@@ -133,17 +180,27 @@ def parse_docx_to_tree(docx_path: str) -> Tuple[str, Node]:
             # 掃描整張表格所有 cell
             for row in block.rows:
                 for cell in row.cells:
-                    for token in HWP_TOKEN_RE.findall(_norm_space(cell.text)):
-                        hw_parts_found.append(token)
+                    cell_text_norm = _norm_space(cell.text)
+                    if debug_docx and len(debug_cell_samples) < 8 and cell_text_norm:
+                        debug_cell_samples.append(cell_text_norm)
+                    for n in HWP_TOKEN_RE.findall(cell_text_norm):
+                        hw_parts_found.append(f"HWP_{n}")
+
+    if hw_part_target_node is not None:
+        print(f"[DOCX] 2.1 table HWP token count: {len(hw_parts_found)}")
+        if debug_docx:
+            print("[DOCX] 2.1 table sample cell texts:")
+            for s in debug_cell_samples:
+                print(f"  - {s}")
 
     # 於 2.1 節點底下新增 HWP_*
-    if hw_parts_found and hw_part_anchor_node:
+    if hw_parts_found and hw_part_target_node:
         seen: set[str] = set()
         for token in hw_parts_found:
             if token in seen:
                 continue
             seen.add(token)
-            hw_part_anchor_node.children.append(Node(name=token, category="Hardware Part"))
+            hw_part_target_node.children.append(Node(name=token, category="Hardware Part"))
 
     return component_name, root
 
@@ -334,6 +391,7 @@ def main(argv: List[str]) -> None:
     parser = argparse.ArgumentParser(description="由 DOCX 解析並在 Codebeamer 建立樹狀項目（測試程式）")
     parser.add_argument("--docx-path", default=os.getenv("CB_DOCX_PATH") or "", help="docx 路徑（也可用 CB_DOCX_PATH）")
     parser.add_argument("--dry-run", action="store_true", help="只解析並印出將建立的樹狀結構，不呼叫 API")
+    parser.add_argument("--debug-docx", action="store_true", help="除錯：額外列出 2.1 區段 table 前幾個 cell 文字")
     parser.add_argument("--apply", action="store_true", help="實際呼叫 API 建立項目（需要 --force）")
     parser.add_argument("--force", action="store_true", help="允許建立（避免重複建立保護）")
     args = parser.parse_args(argv)
@@ -349,7 +407,7 @@ def main(argv: List[str]) -> None:
     if not base_url or not tracker_id:
         raise SystemExit("請先在 .env 設定 CB_BASE_URL 與 CB_TRACKER_ID")
 
-    _, tree = parse_docx_to_tree(docx_path)
+    _, tree = parse_docx_to_tree(docx_path, debug_docx=args.debug_docx)
 
     print("=== 解析結果（將建立的樹狀結構）===\n")
     print_tree(tree)
