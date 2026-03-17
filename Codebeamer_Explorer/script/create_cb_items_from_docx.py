@@ -32,6 +32,13 @@ class Node:
     children: List["Node"] = field(default_factory=list)
 
 
+@dataclass
+class ImageBlob:
+    filename: str
+    content_type: str
+    data: bytes
+
+
 # 支援 "HWP_1" 與 "HWP 1"（docx 表格常見會用空白）
 HWP_TOKEN_RE = re.compile(r"\bHWP(?:_|\s+)(\d+)\b", re.IGNORECASE)
 # 允許常見格式：
@@ -87,6 +94,82 @@ def iter_block_items(parent: _DocxDocument) -> Iterator[Union[Paragraph, Table]]
             yield Paragraph(child, parent)
         elif isinstance(child, CT_Tbl):
             yield Table(child, parent)
+
+
+def extract_images_by_numbering(docx_path: str) -> Dict[str, List[ImageBlob]]:
+    """
+    以章節編號（例如 1.1）為 key，抽出該章節範圍內段落中的圖片。
+    - Word 的自動編號不一定出現在 paragraph.text，因此沿用 ilvl 計數方式取得 numbering。
+    - 圖片來源：Paragraph 內的 blip r:embed 關聯圖片 part。
+    """
+    doc = Document(docx_path)
+    numbering_counters: List[int] = []
+    current_numbering: Optional[str] = None
+    images: Dict[str, List[ImageBlob]] = {}
+
+    namespaces = {
+        "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+        "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    }
+
+    def _ext_from_content_type(ct: str) -> str:
+        m = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/gif": ".gif",
+            "image/bmp": ".bmp",
+            "image/tiff": ".tiff",
+            "image/webp": ".webp",
+        }
+        return m.get(ct.lower(), ".bin")
+
+    for block in iter_block_items(doc):
+        if not isinstance(block, Paragraph):
+            continue
+        text = _norm_space(block.text)
+        if not text:
+            continue
+
+        ilvl = get_paragraph_list_ilvl(block)
+        if ilvl is not None:
+            level = ilvl + 1
+            current_numbering = increment_numbering(numbering_counters, level)
+        else:
+            m = HEADING_RE.match(text)
+            if m:
+                current_numbering = m.group(1)
+
+        if not current_numbering:
+            continue
+
+        # 抽圖：抓所有 a:blip 的 r:embed
+        try:
+            blips = block._p.xpath(".//a:blip", namespaces=namespaces)  # noqa: SLF001
+        except Exception:
+            blips = []
+
+        if not blips:
+            continue
+
+        for idx, blip in enumerate(blips, start=1):
+            rel_id = blip.get(f"{{{namespaces['r']}}}embed")
+            if not rel_id:
+                continue
+            part = block.part.related_parts.get(rel_id)
+            if not part:
+                continue
+            content_type = getattr(part, "content_type", "application/octet-stream")
+            data = getattr(part, "blob", b"")
+            if not data:
+                continue
+            ext = _ext_from_content_type(content_type)
+            filename = f"sec_{current_numbering.replace('.', '_')}_img{idx}{ext}"
+            images.setdefault(current_numbering, []).append(
+                ImageBlob(filename=filename, content_type=content_type, data=data)
+            )
+
+    return images
 
 
 def extract_component_name_from_filename(docx_path: str) -> str:
@@ -226,6 +309,16 @@ def build_auth_and_headers() -> Dict[str, Any]:
     return {"headers": base_headers, "auth": requests.auth.HTTPBasicAuth(username, password)}
 
 
+def get_rest_root_from_v3_base(base_url: str) -> str:
+    """
+    CB_BASE_URL 通常為 .../cb/rest/v3
+    這裡回傳 .../cb/rest 以便呼叫 v2 attachment API。
+    """
+    if base_url.endswith("/v3"):
+        return base_url[: -len("/v3")]
+    return base_url.rsplit("/v3/", 1)[0] if "/v3/" in base_url else base_url
+
+
 def cb_get_json(url: str) -> Any:
     auth_kwargs = build_auth_and_headers()
     resp = requests.get(url, timeout=60, verify=True, **auth_kwargs)
@@ -272,6 +365,72 @@ def insert_child(base_url: str, parent_id: int, child_id: int, *, index: int) ->
     url = f"{base_url}/items/{parent_id}/children?mode=INSERT"
     payload = {"itemReference": {"id": child_id, "type": "TrackerItemReference"}, "index": index}
     cb_patch_json(url, payload)
+
+
+def cb_post_multipart(url: str, files: List[Tuple[str, Tuple[str, bytes, str]]]) -> Any:
+    auth_kwargs = build_auth_and_headers()
+    headers = dict(auth_kwargs["headers"])
+    # requests 會自動處理 multipart boundary，這裡不要手動設 Content-Type
+    resp = requests.post(url, files=files, timeout=120, verify=True, headers=headers, auth=auth_kwargs["auth"])
+    if resp.status_code >= 400:
+        raise RuntimeError(f"POST {url} failed: {resp.status_code} {resp.text}")
+    return resp.json() if resp.text else None
+
+
+def upload_attachment_v2(rest_root: str, item_id: int, img: ImageBlob) -> Any:
+    """
+    依 PTC 文件：POST /v2/item/{trackerItemId}/attachment (multipart/form-data, key=attachments)
+    """
+    url = f"{rest_root}/v2/item/{item_id}/attachment"
+    return cb_post_multipart(url, files=[("attachments", (img.filename, img.data, img.content_type))])
+
+
+def find_tracker_field_id_by_tracker_item_field(base_url: str, tracker_id: int, tracker_item_field: str) -> Optional[int]:
+    fields = cb_get_json(f"{base_url}/trackers/{tracker_id}/fields")
+    if not isinstance(fields, list):
+        return None
+    for f in fields:
+        fid = f.get("id")
+        if not isinstance(fid, int):
+            continue
+        definition = cb_get_json(f"{base_url}/trackers/{tracker_id}/fields/{fid}")
+        tif = (definition.get("trackerItemField") or "").strip().lower()
+        if tif == tracker_item_field.strip().lower():
+            return fid
+    return None
+
+
+def update_item_description_wiki(
+    base_url: str,
+    tracker_id: int,
+    item_id: int,
+    wiki_text: str,
+) -> None:
+    """
+    將 description 設為 Wiki 文字。
+    - 以 tracker 欄位定義取得 description/descriptionFormat 的 fieldId 與 valueModel。
+    - 若找不到 descriptionFormat，仍會嘗試只更新 description。
+    """
+    desc_field_id = find_tracker_field_id_by_tracker_item_field(base_url, tracker_id, "description")
+    if desc_field_id is None:
+        raise RuntimeError("找不到 description 欄位（trackerItemField=description）")
+    desc_def = cb_get_json(f"{base_url}/trackers/{tracker_id}/fields/{desc_field_id}")
+    desc_value_model = (desc_def.get("valueModel") or "WikiTextFieldValue").strip()
+    desc_name = (desc_def.get("name") or "Description").strip()
+
+    field_values: List[Dict[str, Any]] = [
+        {"fieldId": desc_field_id, "type": desc_value_model, "name": desc_name, "value": wiki_text}
+    ]
+
+    fmt_field_id = find_tracker_field_id_by_tracker_item_field(base_url, tracker_id, "descriptionFormat")
+    if fmt_field_id is not None:
+        fmt_def = cb_get_json(f"{base_url}/trackers/{tracker_id}/fields/{fmt_field_id}")
+        fmt_value_model = (fmt_def.get("valueModel") or "TextFieldValue").strip()
+        fmt_name = (fmt_def.get("name") or "Description Format").strip()
+        # 依官方文件慣例：W = Wiki
+        field_values.append({"fieldId": fmt_field_id, "type": fmt_value_model, "name": fmt_name, "value": "W"})
+
+    update_item_fields(base_url, item_id, field_values)
 
 def find_tracker_field_ids(base_url: str, tracker_id: int) -> Tuple[int, int]:
     """
@@ -365,6 +524,7 @@ def apply_tree_to_codebeamer(
     *,
     force: bool,
     reindent: bool,
+    images_by_numbering: Optional[Dict[str, List[ImageBlob]]] = None,
 ) -> int:
     category_field_id, _parent_field_id = find_tracker_field_ids(base_url, tracker_id)
 
@@ -408,6 +568,32 @@ def apply_tree_to_codebeamer(
 
         _reindent(tree)
 
+    # 圖片：將指定章節（例如 1.1）的圖片上傳成附件並插入 description
+    if images_by_numbering:
+        rest_root = get_rest_root_from_v3_base(base_url)
+
+        def _walk(node: Node) -> Iterator[Node]:
+            yield node
+            for ch in node.children:
+                yield from _walk(ch)
+
+        # 以 node.name 前綴（例如 "1.1 "）辨識 numbering
+        for node in _walk(tree):
+            m = re.match(r"^(\d+(?:\.\d+)*)\s+", node.name)
+            if not m:
+                continue
+            numbering = m.group(1)
+            imgs = images_by_numbering.get(numbering)
+            if not imgs:
+                continue
+            item_id = created[id(node)]
+            # 先上傳全部圖片
+            for img in imgs:
+                upload_attachment_v2(rest_root, item_id, img)
+            # 用 wiki markup 插入（附件引用）
+            wiki = "\n".join([f"[!{img.filename}!]" for img in imgs])
+            update_item_description_wiki(base_url, tracker_id, item_id, wiki)
+
     return root_id
 
 
@@ -419,6 +605,7 @@ def main(argv: List[str]) -> None:
     parser.add_argument("--apply", action="store_true", help="實際呼叫 API 建立項目（需要 --force）")
     parser.add_argument("--force", action="store_true", help="允許建立（避免重複建立保護）")
     parser.add_argument("--no-reindent", action="store_true", help="建立後不做 children INSERT 重排（預設會重排）")
+    parser.add_argument("--no-images", action="store_true", help="不處理 docx 圖片（預設會將章節內圖片上傳並插入 description）")
     args = parser.parse_args(argv)
 
     docx_path = args.docx_path.strip().strip('"')
@@ -433,6 +620,7 @@ def main(argv: List[str]) -> None:
         raise SystemExit("請先在 .env 設定 CB_BASE_URL 與 CB_TRACKER_ID")
 
     _, tree = parse_docx_to_tree(docx_path, debug_docx=args.debug_docx)
+    images_by_numbering = None if args.no_images else extract_images_by_numbering(docx_path)
 
     print("=== 解析結果（將建立的樹狀結構）===\n")
     print_tree(tree)
@@ -443,7 +631,14 @@ def main(argv: List[str]) -> None:
     if args.dry_run or not args.apply:
         return
 
-    root_id = apply_tree_to_codebeamer(base_url, tracker_id, tree, force=args.force, reindent=not args.no_reindent)
+    root_id = apply_tree_to_codebeamer(
+        base_url,
+        tracker_id,
+        tree,
+        force=args.force,
+        reindent=not args.no_reindent,
+        images_by_numbering=images_by_numbering,
+    )
     print(f"\n完成。根節點 itemId={root_id}")
 
 

@@ -75,6 +75,7 @@ python script/read_cb_hw2_titles.py
 - **Hardware Component（父項）**：由檔名擷取，例如 `..._PaddyTest.docx` ⇒ `PaddyTest`，Category = `Hardware Component`
 - **章節節點**：依 Word 標題編號（如 `1`, `1.1`, `2`, `2.1`, `3`, `3.1`）建立節點，Category = `Information`
 - **2.1 Hardware Part**：在 `2.1` 區段內掃描表格文字，擷取 `HWP_\\d+`（如 `HWP_1`, `HWP_2`），建立於 `2.1` 節點底下，Category = `Hardware Part`
+- **圖片（段落內）**：若章節段落包含圖片，程式會將圖片上傳為該章節 item 的附件，並在該章節的 description 內用 Wiki 語法插入 `[!filename!]`。
 
 ### 執行方式
 
@@ -96,9 +97,15 @@ python script/create_cb_items_from_docx.py --apply --force
 python script/create_cb_items_from_docx.py --apply --force --no-reindent
 ```
 
-## 4.2 依 Word 編號重排縮排（既有項目）
+若你暫時不想處理圖片（只建立文字結構），可加：
 
-若你已建立項目但 UI 左側樹狀縮排不符合 Word 編號（例如 `1.1` 沒縮在 `1` 底下），可使用 children API 重新掛載既有節點。
+```bash
+python script/create_cb_items_from_docx.py --apply --force --no-images
+```
+
+## 4.2 依 Word 編號重排縮排（維修工具）
+
+若你已建立項目但 UI 左側樹狀縮排不符合 Word 編號（例如 `1.1` 沒縮在 `1` 底下），可使用此維修工具呼叫 children API 重新掛載既有節點。
 
 此腳本會呼叫：
 
