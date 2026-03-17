@@ -78,7 +78,8 @@ python script/read_cb_hw2_titles.py
 Codebeamer_Explorer/
 ├── .env                 # 本機設定（勿提交版控）
 ├── .env.example         # 範例設定檔（無帳密）
-├── SPEC.md              # 本規格書
+├── docs/
+│   └── SPEC.md         # 本規格書
 ├── requirements.txt
 └── script/
     └── read_cb_hw2_titles.py
