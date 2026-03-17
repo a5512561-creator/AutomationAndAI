@@ -1,4 +1,5 @@
 import argparse
+import base64
 import os
 import re
 import sys
@@ -96,7 +97,7 @@ def iter_block_items(parent: _DocxDocument) -> Iterator[Union[Paragraph, Table]]
             yield Table(child, parent)
 
 
-def extract_images_by_numbering(docx_path: str) -> Dict[str, List[ImageBlob]]:
+def extract_images_by_numbering(docx_path: str, *, debug_images: bool = False) -> Dict[str, List[ImageBlob]]:
     """
     以章節編號（例如 1.1）為 key，抽出該章節範圍內段落中的圖片。
     - Word 的自動編號不一定出現在 paragraph.text，因此沿用 ilvl 計數方式取得 numbering。
@@ -128,32 +129,49 @@ def extract_images_by_numbering(docx_path: str) -> Dict[str, List[ImageBlob]]:
         if not isinstance(block, Paragraph):
             continue
         text = _norm_space(block.text)
-        if not text:
-            continue
 
-        ilvl = get_paragraph_list_ilvl(block)
-        if ilvl is not None:
-            level = ilvl + 1
-            current_numbering = increment_numbering(numbering_counters, level)
-        else:
-            m = HEADING_RE.match(text)
-            if m:
-                current_numbering = m.group(1)
+        # 先更新「目前所在章節」：只有在段落有文字時才可能是章節標題
+        if text:
+            ilvl = get_paragraph_list_ilvl(block)
+            if ilvl is not None:
+                level = ilvl + 1
+                current_numbering = increment_numbering(numbering_counters, level)
+            else:
+                m = HEADING_RE.match(text)
+                if m:
+                    current_numbering = m.group(1)
 
         if not current_numbering:
             continue
 
-        # 抽圖：抓所有 a:blip 的 r:embed
+        # 若圖片是以 paragraph.text 讀不到的形式存在，可從 runs 的 drawing element 判斷
+        if debug_images and text and current_numbering:
+            # 只在 debug 時做，避免輸出太多
+            pass
+
+        # 抽圖：不要依賴 namespace 前綴（不同文件/版本可能不同），用 local-name() 找 blip
         try:
-            blips = block._p.xpath(".//a:blip", namespaces=namespaces)  # noqa: SLF001
+            blips = block._p.xpath(".//*[local-name()='blip']")  # noqa: SLF001
         except Exception:
             blips = []
+
+        # 某些文件圖片會用 v:imagedata（舊格式）嵌入
+        if not blips:
+            try:
+                blips = block._p.xpath(".//*[local-name()='imagedata']")  # noqa: SLF001
+            except Exception:
+                blips = []
 
         if not blips:
             continue
 
         for idx, blip in enumerate(blips, start=1):
-            rel_id = blip.get(f"{{{namespaces['r']}}}embed")
+            # r:embed / r:id 取法：不依賴 namespace，直接掃 attribute key
+            rel_id = None
+            for k, v in getattr(blip, "attrib", {}).items():
+                if k.endswith("}embed") or k.endswith("}id"):
+                    rel_id = v
+                    break
             if not rel_id:
                 continue
             part = block.part.related_parts.get(rel_id)
@@ -168,6 +186,16 @@ def extract_images_by_numbering(docx_path: str) -> Dict[str, List[ImageBlob]]:
             images.setdefault(current_numbering, []).append(
                 ImageBlob(filename=filename, content_type=content_type, data=data)
             )
+
+    if debug_images:
+        # 額外印出 docx 內總共幾張圖片（不管是否被歸類）
+        try:
+            total_parts = len(getattr(doc.part, "related_parts", {}))
+        except Exception:
+            total_parts = -1
+        total = sum(len(v) for v in images.values())
+        by = ", ".join([f"{k}:{len(v)}" for k, v in sorted(images.items())])
+        print(f"[DOCX] images extracted: total={total}, by_numbering={{{by}}}, related_parts={total_parts}")
 
     return images
 
@@ -432,6 +460,17 @@ def update_item_description_wiki(
 
     update_item_fields(base_url, item_id, field_values)
 
+
+def images_to_html_plugin(imgs: List[ImageBlob]) -> str:
+    """
+    將圖片以 data URI 內嵌到 WikiText 的 Html plugin，避免某些 CB instance 缺少 attachment upload endpoint。
+    """
+    tags: List[str] = []
+    for img in imgs:
+        b64 = base64.b64encode(img.data).decode("ascii")
+        tags.append(f"<p><img alt=\"{img.filename}\" src=\"data:{img.content_type};base64,{b64}\" /></p>")
+    return "[{Html\n" + "\n".join(tags) + "\n}]"
+
 def find_tracker_field_ids(base_url: str, tracker_id: int) -> Tuple[int, int]:
     """
     找出 Category 與 Parent 欄位的 fieldId。
@@ -492,11 +531,24 @@ def get_choice_option_id_by_name(base_url: str, tracker_id: int, field_id: int, 
     raise RuntimeError(f"找不到 Category 選項：{option_name}（請確認 tracker 的 Category option 名稱完全一致）")
 
 
-def create_item_in_tracker(base_url: str, tracker_id: int, name: str, *, parent_id: Optional[int] = None) -> int:
+def create_item_in_tracker(
+    base_url: str,
+    tracker_id: int,
+    name: str,
+    *,
+    parent_id: Optional[int] = None,
+    description: Optional[str] = None,
+    description_format: Optional[str] = None,
+) -> int:
     payload: Dict[str, Any] = {"name": name}
     if parent_id is not None:
         # 使用建立時指定 parent 來建立樹狀（避免某些版本不支援用 /fields 更新 Parent）
         payload["parent"] = {"id": parent_id, "type": "TrackerItemReference"}
+    if description is not None:
+        payload["description"] = description
+    if description_format is not None:
+        # 常見：PlainText / WikiText / Html（依 instance 而定）；這裡優先使用 WikiText
+        payload["descriptionFormat"] = description_format
     created = cb_post_json(f"{base_url}/trackers/{tracker_id}/items", payload)
     item_id = created.get("id")
     if not isinstance(item_id, int):
@@ -547,7 +599,26 @@ def apply_tree_to_codebeamer(
     created: Dict[int, int] = {}
 
     def _create_recursive(node: Node, parent_id: Optional[int]) -> int:
-        item_id = create_item_in_tracker(base_url, tracker_id, node.name, parent_id=parent_id)
+        # 若該章節有圖片，優先在建立時就寫入 description（避免某些 tracker 不允許後續更新 description field）
+        desc = None
+        desc_fmt = None
+        if images_by_numbering:
+            m = re.match(r"^(\d+(?:\.\d+)*)\s+", node.name)
+            if m:
+                numbering = m.group(1)
+                imgs = images_by_numbering.get(numbering)
+                if imgs:
+                    desc = images_to_html_plugin(imgs)
+                    desc_fmt = "Wiki"
+
+        item_id = create_item_in_tracker(
+            base_url,
+            tracker_id,
+            node.name,
+            parent_id=parent_id,
+            description=desc,
+            description_format=desc_fmt,
+        )
         created[id(node)] = item_id
         field_values: List[Dict[str, Any]] = [build_choice_field_value(category_field_id, _category_option_id(node.category))]
         update_item_fields(base_url, item_id, field_values)
@@ -568,32 +639,6 @@ def apply_tree_to_codebeamer(
 
         _reindent(tree)
 
-    # 圖片：將指定章節（例如 1.1）的圖片上傳成附件並插入 description
-    if images_by_numbering:
-        rest_root = get_rest_root_from_v3_base(base_url)
-
-        def _walk(node: Node) -> Iterator[Node]:
-            yield node
-            for ch in node.children:
-                yield from _walk(ch)
-
-        # 以 node.name 前綴（例如 "1.1 "）辨識 numbering
-        for node in _walk(tree):
-            m = re.match(r"^(\d+(?:\.\d+)*)\s+", node.name)
-            if not m:
-                continue
-            numbering = m.group(1)
-            imgs = images_by_numbering.get(numbering)
-            if not imgs:
-                continue
-            item_id = created[id(node)]
-            # 先上傳全部圖片
-            for img in imgs:
-                upload_attachment_v2(rest_root, item_id, img)
-            # 用 wiki markup 插入（附件引用）
-            wiki = "\n".join([f"[!{img.filename}!]" for img in imgs])
-            update_item_description_wiki(base_url, tracker_id, item_id, wiki)
-
     return root_id
 
 
@@ -606,6 +651,7 @@ def main(argv: List[str]) -> None:
     parser.add_argument("--force", action="store_true", help="允許建立（避免重複建立保護）")
     parser.add_argument("--no-reindent", action="store_true", help="建立後不做 children INSERT 重排（預設會重排）")
     parser.add_argument("--no-images", action="store_true", help="不處理 docx 圖片（預設會將章節內圖片上傳並插入 description）")
+    parser.add_argument("--debug-images", action="store_true", help="除錯：印出 docx 圖片抽取統計")
     args = parser.parse_args(argv)
 
     docx_path = args.docx_path.strip().strip('"')
@@ -620,7 +666,7 @@ def main(argv: List[str]) -> None:
         raise SystemExit("請先在 .env 設定 CB_BASE_URL 與 CB_TRACKER_ID")
 
     _, tree = parse_docx_to_tree(docx_path, debug_docx=args.debug_docx)
-    images_by_numbering = None if args.no_images else extract_images_by_numbering(docx_path)
+    images_by_numbering = None if args.no_images else extract_images_by_numbering(docx_path, debug_images=args.debug_images)
 
     print("=== 解析結果（將建立的樹狀結構）===\n")
     print_tree(tree)
