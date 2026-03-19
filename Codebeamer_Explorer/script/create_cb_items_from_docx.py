@@ -1,5 +1,6 @@
 import argparse
 import base64
+import json
 import os
 import re
 import sys
@@ -25,12 +26,23 @@ except Exception as exc:  # pragma: no cover
 
 load_dotenv()
 
+def _env_bool(name: str, default: bool) -> bool:
+    v = (os.getenv(name) or "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "y", "on")
+
+
+CB_VERIFY_SSL = _env_bool("CB_VERIFY_SSL", True)
+
 
 @dataclass
 class Node:
     name: str
     category: str
     children: List["Node"] = field(default_factory=list)
+    # 章節內的正文文字（由 Word 段落擷取）
+    description_lines: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -262,6 +274,9 @@ def parse_docx_to_tree(docx_path: str, *, debug_docx: bool = False) -> Tuple[str
                 # fallback：若有人把編號打在文字內，仍可吃到
                 m = HEADING_RE.match(text)
                 if not m:
+                    # 非標題段落：附加到目前章節（stack 最底層）的 description_lines
+                    if stack:
+                        stack[-1][1].description_lines.append(text)
                     continue
                 numbering = m.group(1)
                 title = m.group(2)
@@ -317,7 +332,12 @@ def parse_docx_to_tree(docx_path: str, *, debug_docx: bool = False) -> Tuple[str
 
 
 def print_tree(node: Node, indent: str = "") -> None:
-    print(f"{indent}- {node.name}  [Category={node.category}]")
+    sample_desc = ""
+    if getattr(node, "description_lines", None):
+        lines = node.description_lines
+        if lines:
+            sample_desc = f"  [Desc={lines[0][:30]!r}{'...' if len(lines[0]) > 30 else ''}]"
+    print(f"{indent}- {node.name}  [Category={node.category}]{sample_desc}")
     for c in node.children:
         print_tree(c, indent + "  ")
 
@@ -349,7 +369,7 @@ def get_rest_root_from_v3_base(base_url: str) -> str:
 
 def cb_get_json(url: str) -> Any:
     auth_kwargs = build_auth_and_headers()
-    resp = requests.get(url, timeout=60, verify=True, **auth_kwargs)
+    resp = requests.get(url, timeout=60, verify=CB_VERIFY_SSL, **auth_kwargs)
     if resp.status_code >= 400:
         raise RuntimeError(f"GET {url} failed: {resp.status_code} {resp.text}")
     return resp.json()
@@ -359,7 +379,7 @@ def cb_post_json(url: str, payload: Dict[str, Any]) -> Any:
     auth_kwargs = build_auth_and_headers()
     headers = dict(auth_kwargs["headers"])
     headers["Content-Type"] = "application/json"
-    resp = requests.post(url, json=payload, timeout=60, verify=True, headers=headers, auth=auth_kwargs["auth"])
+    resp = requests.post(url, json=payload, timeout=60, verify=CB_VERIFY_SSL, headers=headers, auth=auth_kwargs["auth"])
     if resp.status_code >= 400:
         raise RuntimeError(f"POST {url} failed: {resp.status_code} {resp.text}")
     return resp.json()
@@ -369,7 +389,7 @@ def cb_put_json(url: str, payload: Dict[str, Any]) -> Any:
     auth_kwargs = build_auth_and_headers()
     headers = dict(auth_kwargs["headers"])
     headers["Content-Type"] = "application/json"
-    resp = requests.put(url, json=payload, timeout=60, verify=True, headers=headers, auth=auth_kwargs["auth"])
+    resp = requests.put(url, json=payload, timeout=60, verify=CB_VERIFY_SSL, headers=headers, auth=auth_kwargs["auth"])
     if resp.status_code >= 400:
         raise RuntimeError(f"PUT {url} failed: {resp.status_code} {resp.text}")
     return resp.json()
@@ -379,7 +399,7 @@ def cb_patch_json(url: str, payload: Dict[str, Any]) -> Any:
     auth_kwargs = build_auth_and_headers()
     headers = dict(auth_kwargs["headers"])
     headers["Content-Type"] = "application/json"
-    resp = requests.patch(url, json=payload, timeout=60, verify=True, headers=headers, auth=auth_kwargs["auth"])
+    resp = requests.patch(url, json=payload, timeout=60, verify=CB_VERIFY_SSL, headers=headers, auth=auth_kwargs["auth"])
     if resp.status_code >= 400:
         raise RuntimeError(f"PATCH {url} failed: {resp.status_code} {resp.text}")
     return resp.json() if resp.text else None
@@ -399,10 +419,31 @@ def cb_post_multipart(url: str, files: List[Tuple[str, Tuple[str, bytes, str]]])
     auth_kwargs = build_auth_and_headers()
     headers = dict(auth_kwargs["headers"])
     # requests 會自動處理 multipart boundary，這裡不要手動設 Content-Type
-    resp = requests.post(url, files=files, timeout=120, verify=True, headers=headers, auth=auth_kwargs["auth"])
+    resp = requests.post(url, files=files, timeout=120, verify=CB_VERIFY_SSL, headers=headers, auth=auth_kwargs["auth"])
     if resp.status_code >= 400:
         raise RuntimeError(f"POST {url} failed: {resp.status_code} {resp.text}")
     return resp.json() if resp.text else None
+
+
+
+def cb_post_multipart_raw(url: str, files: List[Tuple[str, Tuple[str, bytes, str]]]) -> Tuple[int, str]:
+    raise RuntimeError("probe 模式已移除：cb_post_multipart_raw 不再使用")
+
+
+def cb_put_multipart_raw(url: str, files: List[Tuple[str, Tuple[str, bytes, str]]]) -> Tuple[int, str]:
+    raise RuntimeError("probe 模式已移除：cb_put_multipart_raw 不再使用")
+
+
+def cb_post_json_raw(url: str, payload: Dict[str, Any]) -> Tuple[int, str]:
+    raise RuntimeError("probe 模式已移除：cb_post_json_raw 不再使用")
+
+
+def cb_put_bytes_raw(url: str, data: bytes, *, content_type: str) -> Tuple[int, str]:
+    raise RuntimeError("probe 模式已移除：cb_put_bytes_raw 不再使用")
+
+
+def cb_get_raw(url: str, *, timeout_s: int = 30) -> Tuple[int, str, int]:
+    raise RuntimeError("probe 模式已移除：cb_get_raw 不再使用")
 
 
 def upload_attachment_v2(rest_root: str, item_id: int, img: ImageBlob) -> Any:
@@ -411,6 +452,112 @@ def upload_attachment_v2(rest_root: str, item_id: int, img: ImageBlob) -> Any:
     """
     url = f"{rest_root}/v2/item/{item_id}/attachment"
     return cb_post_multipart(url, files=[("attachments", (img.filename, img.data, img.content_type))])
+
+
+def get_display_base_from_api_base(base_url: str) -> str:
+    """從 API 基底 (…/cb/rest/v3) 推得網頁基底 (…/cb)，供 displayDocument 連結用。"""
+    s = base_url.rstrip("/")
+    if s.endswith("/v3"):
+        s = s[: -len("/v3")]
+    if "/rest" in s:
+        s = s.split("/rest")[0]
+    return s.rstrip("/") or base_url
+
+
+def get_api_v3_base_from_rest_v3_base(rest_v3_base: str) -> str:
+    """
+    部分 CB 環境附件 API 走 /api/v3，而非 /cb/rest/v3。
+    例：https://host/cb/rest/v3  => https://host/cb/api/v3
+    """
+    s = rest_v3_base.rstrip("/")
+    if "/cb/rest/v3" in s:
+        return s.replace("/cb/rest/v3", "/cb/api/v3")
+    if s.endswith("/rest/v3"):
+        return s[: -len("/rest/v3")] + "/api/v3"
+    # fallback：以 host 為基底
+    host = s.split("/rest", 1)[0] if "/rest" in s else s
+    return host.rstrip("/") + "/api/v3"
+
+
+def list_item_attachments(base_url: str, rest_root: str, item_id: int) -> List[Dict[str, Any]]:
+    """取得項目的附件列表。先試 v3 再試 v2。回傳 [] 表示無法取得或無附件。"""
+    api_v3 = get_api_v3_base_from_rest_v3_base(base_url)
+    for url in (
+        f"{api_v3}/items/{item_id}/attachments",
+        f"{base_url}/items/{item_id}/attachments",
+        f"{rest_root}/v2/item/{item_id}/attachments",
+    ):
+        try:
+            out = cb_get_json(url)
+            if isinstance(out, list):
+                return out
+            if isinstance(out, dict) and "attachments" in out:
+                return out.get("attachments") or []
+        except Exception:
+            continue
+    return []
+
+
+def upload_attachment(
+    base_url: str, rest_root: str, item_id: int, img: ImageBlob
+) -> Optional[Tuple[int, str]]:
+    """
+    上傳單一圖片為項目附件。先試 v3 再試 v2，multipart 欄位名固定為 "attachments"。
+    成功回傳 (attachment_id, filename)，失敗回傳 None 並印出最後一次錯誤。
+    若 POST 回傳 []，會改以 GET 附件列表依檔名查找剛上傳的附件 id。
+    """
+    last_error: Optional[str] = None
+    r: Any = None
+    api_v3 = get_api_v3_base_from_rest_v3_base(base_url)
+    v3_urls = [
+        f"{api_v3}/items/{item_id}/attachments",
+        f"{api_v3}/items/{item_id}/attachments/content",
+        f"{base_url}/items/{item_id}/attachments",
+        f"{base_url}/items/{item_id}/attachments/content",
+    ]
+    for url_v3 in v3_urls:
+        try:
+            r = cb_post_multipart(url_v3, files=[("attachments", (img.filename, img.data, img.content_type))])
+            break
+        except Exception as e:
+            last_error = str(e).strip()
+            r = None
+    if r is None:
+        try:
+            r = upload_attachment_v2(rest_root, item_id, img)
+        except Exception as e:
+            last_error = str(e).strip()
+    # 回傳可能為 list（v2 風格）或單一物件
+    if isinstance(r, list) and len(r) > 0:
+        first = r[0]
+        aid = first.get("id") if isinstance(first, dict) else None
+        name = (first.get("name") or img.filename) if isinstance(first, dict) else img.filename
+        if isinstance(aid, int):
+            return (aid, name)
+    if isinstance(r, dict):
+        aid = r.get("id")
+        name = r.get("name") or img.filename
+        if isinstance(aid, int):
+            return (aid, name)
+    # 若 POST 回傳 []，可能上傳成功但 API 未回傳 id → 用 GET 附件列表依檔名找
+    if r == [] or (isinstance(r, list) and len(r) == 0):
+        atts = list_item_attachments(base_url, rest_root, item_id)
+        for a in atts:
+            if not isinstance(a, dict):
+                continue
+            name = (a.get("name") or "").strip() or (a.get("fileName") or "").strip()
+            if name == img.filename:
+                aid = a.get("id")
+                if isinstance(aid, int):
+                    print(f"  [附件] POST 回傳 []，已從 GET 附件列表取得 id={aid} ({img.filename})")
+                    return (aid, img.filename)
+    # 失敗時一律印出，方便 IT 排查
+    if last_error:
+        print(f"  [附件] 上傳錯誤（供 IT 排查）: {last_error}")
+    else:
+        summary = str(r)[:300] if r is not None else "無回應"
+        print(f"  [附件] 上傳失敗（回應無法解析，供 IT 排查）: {summary}")
+    return None
 
 
 def find_tracker_field_id_by_tracker_item_field(base_url: str, tracker_id: int, tracker_item_field: str) -> Optional[int]:
@@ -434,42 +581,23 @@ def update_item_description_wiki(
     item_id: int,
     wiki_text: str,
 ) -> None:
+    """probe 區塊已移除：此函式不再供主流程使用。"""
+    raise RuntimeError("probe 模式已移除：update_item_description_wiki 不再使用")
+
+
+def images_to_cb_image_macros(uploaded: List[Tuple[int, str]], *, task_id: int, width: int = 600, height: int = 400) -> str:
     """
-    將 description 設為 Wiki 文字。
-    - 以 tracker 欄位定義取得 description/descriptionFormat 的 fieldId 與 valueModel。
-    - 若找不到 descriptionFormat，仍會嘗試只更新 description。
+    使用既有 item(7232) 的 markup 方式，產生 Codebeamer Image macro。
+    需要 artifact_id（attachment id），否則前端不會渲染圖片。
+
+    例：
+      [{Image wiki='[CB:/displayDocument/MKSImg...png?task_id=7232&artifact_id=16929]' width='600' height='400'}]
     """
-    desc_field_id = find_tracker_field_id_by_tracker_item_field(base_url, tracker_id, "description")
-    if desc_field_id is None:
-        raise RuntimeError("找不到 description 欄位（trackerItemField=description）")
-    desc_def = cb_get_json(f"{base_url}/trackers/{tracker_id}/fields/{desc_field_id}")
-    desc_value_model = (desc_def.get("valueModel") or "WikiTextFieldValue").strip()
-    desc_name = (desc_def.get("name") or "Description").strip()
-
-    field_values: List[Dict[str, Any]] = [
-        {"fieldId": desc_field_id, "type": desc_value_model, "name": desc_name, "value": wiki_text}
-    ]
-
-    fmt_field_id = find_tracker_field_id_by_tracker_item_field(base_url, tracker_id, "descriptionFormat")
-    if fmt_field_id is not None:
-        fmt_def = cb_get_json(f"{base_url}/trackers/{tracker_id}/fields/{fmt_field_id}")
-        fmt_value_model = (fmt_def.get("valueModel") or "TextFieldValue").strip()
-        fmt_name = (fmt_def.get("name") or "Description Format").strip()
-        # 依官方文件慣例：W = Wiki
-        field_values.append({"fieldId": fmt_field_id, "type": fmt_value_model, "name": fmt_name, "value": "W"})
-
-    update_item_fields(base_url, item_id, field_values)
-
-
-def images_to_html_plugin(imgs: List[ImageBlob]) -> str:
-    """
-    將圖片以 data URI 內嵌到 WikiText 的 Html plugin，避免某些 CB instance 缺少 attachment upload endpoint。
-    """
-    tags: List[str] = []
-    for img in imgs:
-        b64 = base64.b64encode(img.data).decode("ascii")
-        tags.append(f"<p><img alt=\"{img.filename}\" src=\"data:{img.content_type};base64,{b64}\" /></p>")
-    return "[{Html\n" + "\n".join(tags) + "\n}]"
+    parts: List[str] = []
+    for att_id, filename in uploaded:
+        link = f"[CB:/displayDocument/{filename}?task_id={task_id}&artifact_id={att_id}]"
+        parts.append(f"[{{Image wiki='{link}' width='{width}' height='{height}'}}]")
+    return "\n\n".join(parts)
 
 def find_tracker_field_ids(base_url: str, tracker_id: int) -> Tuple[int, int]:
     """
@@ -531,6 +659,11 @@ def get_choice_option_id_by_name(base_url: str, tracker_id: int, field_id: int, 
     raise RuntimeError(f"找不到 Category 選項：{option_name}（請確認 tracker 的 Category option 名稱完全一致）")
 
 
+def get_item(base_url: str, item_id: int) -> Dict[str, Any]:
+    """GET 單一 item，用於驗證 description 是否被伺服器儲存。"""
+    return cb_get_json(f"{base_url}/items/{item_id}")
+
+
 def create_item_in_tracker(
     base_url: str,
     tracker_id: int,
@@ -547,7 +680,6 @@ def create_item_in_tracker(
     if description is not None:
         payload["description"] = description
     if description_format is not None:
-        # 常見：PlainText / WikiText / Html（依 instance 而定）；這裡優先使用 WikiText
         payload["descriptionFormat"] = description_format
     created = cb_post_json(f"{base_url}/trackers/{tracker_id}/items", payload)
     item_id = created.get("id")
@@ -584,6 +716,19 @@ def apply_tree_to_codebeamer(
     cat_hw_part = get_choice_option_id_by_name(base_url, tracker_id, category_field_id, "Hardware Part")
     cat_information = get_choice_option_id_by_name(base_url, tracker_id, category_field_id, "Information")
 
+    rest_root = get_rest_root_from_v3_base(base_url)
+    display_base = get_display_base_from_api_base(base_url)
+
+    # 上傳圖片到固定 item（host），用其 attachment 的 artifact_id 生成 Image macro。
+    # 這樣 description 只需要在 POST 建立時帶入即可，避免 description PUT 403 問題。
+    attachment_host_item_id = int(
+        os.getenv("CB_ATTACHMENT_HOST_ITEM_ID")
+        or os.getenv("CB_TEST_ITEM_ID")
+        or "0"
+    )
+    if attachment_host_item_id <= 0:
+        raise SystemExit("請在 .env 設定 CB_ATTACHMENT_HOST_ITEM_ID（建議填 7232）或至少填 CB_TEST_ITEM_ID")
+
     # 簡化：不做「同名搜尋」避免 endpoint 差異；若要避免重複，使用者先用 UI / 或之後補強 query API
     if not force:
         print("（--force 未指定）提醒：此測試程式不做同名去重，若要允許重複建立請加 --force。")
@@ -599,17 +744,45 @@ def apply_tree_to_codebeamer(
     created: Dict[int, int] = {}
 
     def _create_recursive(node: Node, parent_id: Optional[int]) -> int:
-        # 若該章節有圖片，優先在建立時就寫入 description（避免某些 tracker 不允許後續更新 description field）
-        desc = None
-        desc_fmt = None
+        imgs: Optional[List[ImageBlob]] = None
         if images_by_numbering:
             m = re.match(r"^(\d+(?:\.\d+)*)\s+", node.name)
             if m:
-                numbering = m.group(1)
-                imgs = images_by_numbering.get(numbering)
-                if imgs:
-                    desc = images_to_html_plugin(imgs)
-                    desc_fmt = "Wiki"
+                imgs = images_by_numbering.get(m.group(1))
+
+        text_desc = "\n".join(getattr(node, "description_lines", [])).strip()
+
+        desc: Optional[str] = None
+        desc_fmt: Optional[str] = None
+
+        # 重要：你們環境對 Description 欄位 PUT 會 403（not writable），因此 description 只能在 POST 建立時帶入。
+        # 同時前端 Image macro 需要 artifact_id，因此這裡必須先把圖片上傳到 host item，拿到 artifact_id。
+        if imgs:
+            uploaded: List[Tuple[int, str]] = []
+            print(f"  [圖片] {node.name!r}: 先上傳 {len(imgs)} 張到 host itemId={attachment_host_item_id}…")
+            for img in imgs:
+                one = upload_attachment(base_url, rest_root, attachment_host_item_id, img)
+                if one:
+                    uploaded.append(one)
+                else:
+                    break
+            if len(uploaded) == len(imgs):
+                desc = images_to_cb_image_macros(uploaded, task_id=attachment_host_item_id)
+                desc_fmt = "Wiki"
+                print(f"  [圖片] Image macro 產生完成（artifact_id count={len(uploaded)}）")
+            else:
+                print(f"  [警告] host 上傳成功 {len(uploaded)}/{len(imgs)}，目前仍需 artifact_id 才可渲染；本節點將不寫入圖片 description")
+                desc = None
+                desc_fmt = None
+
+        # 若有章節文字，把文字和圖片一起塞進 description（description PUT 在此環境會 403，所以只用 POST）
+        if text_desc:
+            if desc:
+                desc = f"{text_desc}\n\n{desc}"
+            else:
+                desc = text_desc
+            # 文字本身與 Wiki macro 都用 Wiki 格式
+            desc_fmt = desc_fmt or "Wiki"
 
         item_id = create_item_in_tracker(
             base_url,
@@ -620,8 +793,20 @@ def apply_tree_to_codebeamer(
             description_format=desc_fmt,
         )
         created[id(node)] = item_id
+
         field_values: List[Dict[str, Any]] = [build_choice_field_value(category_field_id, _category_option_id(node.category))]
         update_item_fields(base_url, item_id, field_values)
+
+        # 驗證：description 是否含 displayDocument（image macro）
+        if desc:
+            try:
+                item = get_item(base_url, item_id)
+                stored = (item.get("description") or "").strip()
+                has_disp = "displayDocument" in stored
+                print(f"  [檢查] itemId={item_id} description_len={len(stored)} has_displayDocument={'是' if has_disp else '否'}")
+                print(f"    stored_snippet={stored[:200]!r}")
+            except Exception as e:
+                print(f"  [檢查] 無法 GET 驗證 description：{e}")
 
         for child in node.children:
             _create_recursive(child, item_id)
@@ -664,6 +849,179 @@ def main(argv: List[str]) -> None:
     tracker_id = int(os.getenv("CB_TRACKER_ID", "0") or "0")
     if not base_url or not tracker_id:
         raise SystemExit("請先在 .env 設定 CB_BASE_URL 與 CB_TRACKER_ID")
+    # 探針/除錯模式已移除（保留程式碼但強制不執行，避免誤用）
+    if False and (args.probe_attachments or args.probe_description or args.probe_existing_attachment):
+        item_id = int(args.probe_item_id or 0)
+        if item_id <= 0:
+            raise SystemExit("請提供 --probe-item-id 或在 .env 設定 CB_TEST_ITEM_ID")
+        rest_root = get_rest_root_from_v3_base(base_url)
+        api_v3 = get_api_v3_base_from_rest_v3_base(base_url)
+
+        if args.probe_existing_attachment:
+            att_id = int(args.probe_attachment_id or 0)
+            if att_id <= 0:
+                raise SystemExit("請提供 --probe-attachment-id（artifact_id）")
+            print(f"=== 探針：既有附件（itemId={item_id}, attachmentId={att_id}）===\n")
+            # 1) 列附件
+            print("[probe] list_item_attachments()")
+            atts = list_item_attachments(base_url, rest_root, item_id)
+            print(f"  count={len(atts)}")
+            for a in atts[:5]:
+                if isinstance(a, dict):
+                    print(f"  - id={a.get('id')} name={a.get('name') or a.get('fileName')}")
+            # 2) GET attachment metadata/content（嘗試常見路徑）
+            candidates = [
+                f"{base_url}/attachments/{att_id}",
+                f"{base_url}/attachments/{att_id}/content",
+                f"{api_v3}/attachments/{att_id}",
+                f"{api_v3}/attachments/{att_id}/content",
+                f"{rest_root}/v2/attachment/{att_id}",
+                f"{rest_root}/v2/attachment/{att_id}/content",
+            ]
+            print("\n[probe] GET attachment endpoints")
+            for u in candidates:
+                status, ct, blen = cb_get_raw(u)
+                print(f"  - GET {u}\n    status={status} content-type={ct} bytes={blen}")
+            print("\n（若能成功取得 content 且 content-type 為 image/png，代表附件讀取 API 可用；接著就只差『上傳 API』與『回傳 id』）\n")
+
+        if args.probe_attachments:
+            print(f"=== 探針：附件上傳（itemId={item_id}）===\n")
+            png_1x1 = base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6XG7mQAAAAASUVORK5CYII="
+            )
+            img = ImageBlob(filename="cursor_probe.png", content_type="image/png", data=png_1x1)
+            if args.probe_attachments_verbose:
+                candidates = [
+                    f"{api_v3}/items/{item_id}/attachments",
+                    f"{api_v3}/items/{item_id}/attachments/content",
+                    f"{base_url}/items/{item_id}/attachments",
+                    f"{base_url}/items/{item_id}/attachments/content",
+                    f"{rest_root}/v2/item/{item_id}/attachment",
+                ]
+                for u in candidates:
+                    status, txt = cb_post_multipart_raw(u, files=[("attachments", (img.filename, img.data, img.content_type))])
+                    snippet = (txt or "").replace("\r", " ").replace("\n", " ")
+                    if len(snippet) > 300:
+                        snippet = snippet[:300] + "…"
+                    print(f"[probe] POST {u}\n  status={status}\n  body={snippet}\n")
+            out = upload_attachment(base_url, rest_root, item_id, img)
+            print(f"\n探針結果：upload_attachment => {out!r}")
+            atts = list_item_attachments(base_url, rest_root, item_id)
+            names = []
+            for a in atts:
+                if isinstance(a, dict):
+                    nm = (a.get("name") or a.get("fileName") or "").strip()
+                    if nm:
+                        names.append(nm)
+            print(f"附件列表（檔名）前 20 筆：{names[:20]}")
+            print("\n（若 upload 回傳 None 但附件列表出現 cursor_probe.png，表示上傳成功但回應不含 id，需要 IT 提供正確回應格式/endpoint）")
+
+            if args.probe_attachments_deep:
+                print("\n=== deep probe: 測 /cb/rest/v3/items/{id}/attachments 不同欄位名 ===\n")
+                base_att_url = f"{base_url}/items/{item_id}/attachments"
+                before = set(names)
+                field_names = ["attachments", "file", "files", "upload", "content"]
+                for fn in field_names:
+                    status, txt = cb_post_multipart_raw(
+                        base_att_url, files=[(fn, (img.filename, img.data, img.content_type))]
+                    )
+                    snippet = (txt or "").replace("\r", " ").replace("\n", " ")
+                    if len(snippet) > 200:
+                        snippet = snippet[:200] + "…"
+                    after_names = []
+                    try:
+                        atts2 = list_item_attachments(base_url, rest_root, item_id)
+                        for a in atts2:
+                            if isinstance(a, dict):
+                                nm2 = (a.get("name") or a.get("fileName") or "").strip()
+                                if nm2:
+                                    after_names.append(nm2)
+                    except Exception:
+                        pass
+                    added = sorted(set(after_names) - before)
+                    print(f"[deep] field={fn!r} status={status} body={snippet}")
+                    print(f"       added={added[:5]}")
+                # 再測 PUT（有些 API 用 PUT）
+                for fn in field_names:
+                    status, txt = cb_put_multipart_raw(
+                        base_att_url, files=[(fn, (img.filename, img.data, img.content_type))]
+                    )
+                    snippet = (txt or "").replace("\r", " ").replace("\n", " ")
+                    if len(snippet) > 200:
+                        snippet = snippet[:200] + "…"
+                    after_names = []
+                    try:
+                        atts2 = list_item_attachments(base_url, rest_root, item_id)
+                        for a in atts2:
+                            if isinstance(a, dict):
+                                nm2 = (a.get("name") or a.get("fileName") or "").strip()
+                                if nm2:
+                                    after_names.append(nm2)
+                    except Exception:
+                        pass
+                    added = sorted(set(after_names) - before)
+                    print(f"[deep-put] field={fn!r} status={status} body={snippet}")
+                    print(f"           added={added[:5]}")
+                print("\n（若任何欄位名能讓 added 出現 cursor_probe.png，就表示上傳欄位名要用那個）")
+
+                print("\n=== deep probe: 嘗試 JSON 建立 attachment，再 PUT /attachments/{id}/content ===\n")
+                # 1) POST 建立 attachment metadata（若支援）
+                create_payloads = [
+                    {"name": img.filename},
+                    {"name": img.filename, "fileName": img.filename},
+                    {"name": img.filename, "contentType": img.content_type},
+                ]
+                created_id: Optional[int] = None
+                for p in create_payloads:
+                    st, tx = cb_post_json_raw(base_att_url, p)
+                    snippet2 = (tx or "").replace("\r", " ").replace("\n", " ")
+                    if len(snippet2) > 200:
+                        snippet2 = snippet2[:200] + "…"
+                    print(f"[deep-json] POST {base_att_url} payload={p} => status={st} body={snippet2}")
+                    if st in (200, 201) and tx.strip():
+                        try:
+                            j = json.loads(tx)
+                            if isinstance(j, dict) and isinstance(j.get("id"), int):
+                                created_id = int(j["id"])
+                                break
+                            if isinstance(j, list) and j and isinstance(j[0], dict) and isinstance(j[0].get("id"), int):
+                                created_id = int(j[0]["id"])
+                                break
+                        except Exception:
+                            pass
+                if created_id:
+                    put_url = f"{base_url}/attachments/{created_id}/content"
+                    stp, txp = cb_put_bytes_raw(put_url, img.data, content_type=img.content_type)
+                    snippet3 = (txp or "").replace("\r", " ").replace("\n", " ")
+                    if len(snippet3) > 200:
+                        snippet3 = snippet3[:200] + "…"
+                    print(f"[deep-json] PUT {put_url} => status={stp} body={snippet3}")
+                    # 再列一次附件看是否新增
+                    atts3 = list_item_attachments(base_url, rest_root, item_id)
+                    after3 = []
+                    for a in atts3:
+                        if isinstance(a, dict):
+                            nm3 = (a.get("name") or a.get("fileName") or "").strip()
+                            if nm3:
+                                after3.append(nm3)
+                    added3 = sorted(set(after3) - before)
+                    print(f"[deep-json] after added={added3[:10]}")
+                else:
+                    print("[deep-json] 無法從 POST 回應取得 attachment id（可能此 endpoint 不支援 JSON 建立）")
+        if args.probe_description:
+            print(f"\n=== 探針：Description 寫入（itemId={item_id}）===\n")
+            try:
+                update_item_description_wiki(base_url, tracker_id, item_id, "Cursor probe: !cursor_probe.png!")
+                print("Description 寫入：成功")
+                try:
+                    item = get_item(base_url, item_id)
+                    stored = (item.get("description") or "").strip()
+                    print(f"[probe] GET description length={len(stored)} contains '!cursor_probe.png!'={'!cursor_probe.png!' in stored}")
+                except Exception as ge:
+                    print(f"[probe] GET 驗證失敗：{ge}")
+            except Exception as e:
+                print(f"Description 寫入：失敗 => {e}")
+        return
 
     _, tree = parse_docx_to_tree(docx_path, debug_docx=args.debug_docx)
     images_by_numbering = None if args.no_images else extract_images_by_numbering(docx_path, debug_images=args.debug_images)
@@ -686,6 +1044,10 @@ def main(argv: List[str]) -> None:
         images_by_numbering=images_by_numbering,
     )
     print(f"\n完成。根節點 itemId={root_id}")
+    if images_by_numbering and sum(len(v) for v in images_by_numbering.values()) > 0:
+        print("  若網頁上該項目 Description 未顯示圖片，請執行：")
+        print("    1) --dry-run --debug-images  確認 docx 是否有抽出圖片")
+        print("    2) 在 Codebeamer 開啟該項目，檢視 Description 欄位是否含 [{Html ...}] 或 <img>")
 
 
 if __name__ == "__main__":
